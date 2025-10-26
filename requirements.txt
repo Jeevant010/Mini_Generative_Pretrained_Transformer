@@ -1,5 +1,4 @@
 torch
-pylzma
 tokenizers
 tqdm
 transformers
