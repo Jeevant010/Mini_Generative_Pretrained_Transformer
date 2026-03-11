@@ -10,3 +10,4 @@ datasets>=3.0.0
 
 # Utilities
 tqdm>=4.66.0
+encode
