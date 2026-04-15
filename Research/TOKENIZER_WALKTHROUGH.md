@@ -298,10 +298,12 @@ How to pick quickly:
 
 1. Start with `rtx_4060_quality`.
 2. If CUDA out-of-memory happens, reduce in this order:
-  - lower `batch_size`
-  - lower `negatives`
-  - lower `max_pairs`
-  - lower `dim`
+
+- lower `batch_size`
+- lower `negatives`
+- lower `max_pairs`
+- lower `dim`
+
 3. If training is stable and GPU usage is low, increase `batch_size` first.
 
 If your notebook shows `Device: cpu` even though you have a 4060:
@@ -315,22 +317,27 @@ If your notebook shows `Device: cpu` even though you have a 4060:
 Use this as your decision map:
 
 1. SGNS / Word2Vec-style token embeddings
+
 - Best for: fast semantic warm-start from raw corpus
 - Use when: you want strong local token neighborhoods before transformer training
 
 2. Transformer token embeddings (jointly trained with LM objective)
+
 - Best for: final LLM quality
 - Use when: your attention notebook is ready and you begin autoregressive training
 
 3. Learned positional embeddings
+
 - Best for: fixed max context training
 - Use when: sequence length is known and stable (for example 256, 512, 1024)
 
 4. RoPE/sinusoidal positional methods
+
 - Best for: better length extrapolation and portability
 - Use when: you expect longer context at inference than training
 
 5. Subword-aware embeddings (for example FastText-like ideas)
+
 - Best for: noisy text, typo-heavy data, morphology-rich languages
 - Use when: token form variation is very high
 
