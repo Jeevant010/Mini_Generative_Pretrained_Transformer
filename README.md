@@ -1,138 +1,81 @@
-# Mini Generative Pretrained Transformer
+# Mini Generative Pretrained Transformer (Production Edition)
 
-A personal educational project for building a small GPT-style language model from scratch using PyTorch.
+A high-performance, production-ready implementation of a Small Language Model (SLM) using PyTorch. This project features a modern Transformer architecture optimized for local hardware (NVIDIA RTX 40-series) and can efficiently train on large datasets like OpenWebText.
 
-The repository includes:
-- Core training and generation scripts
-- Memory-mapped dataset batching for efficient text sampling
-- Data extraction utilities for OpenWebText `.xz` files
-- Research notes and notebooks explaining attention, tokenization, embeddings, and full architecture
+## 🚀 Key Features
 
-## Project Goals
+- **Modern Architecture**: Implements **GQA** (Grouped-Query Attention), **RoPE** (Rotary Positional Embeddings), **SwiGLU** activation, and **RMSNorm**.
+- **Production Data Pipeline**: Streams local Parquet files, trains a high-speed BPE tokenizer (Rust-powered), and generates memory-mapped binary datasets for zero-latency training.
+- **Hardware Optimized**: Native support for **`bfloat16`** mixed-precision training on NVIDIA Ada Lovelace GPUs (RTX 4060/4070/4080/4090).
+- **Auto-Resume**: Robust checkpointing system that automatically saves progress and resumes from the latest state.
+- **Modular Design**: Clean separation between model architecture, tokenizer, data loading, and training logic.
 
-- Learn transformer internals by implementing core blocks manually
-- Train a compact autoregressive language model on text data
-- Experiment with architecture and hyperparameters on local hardware (CPU/GPU)
-- Maintain notebook-based research notes for iterative learning
-
-## Repository Structure
+## 📁 Repository Structure
 
 ```text
 Mini_Generative_Pretrained_Transformer/
-|- app.py                      # Currently empty
-|- config.py                   # Device + hyperparameters + data path
-|- dataset.py                  # mmap-based random chunk loading and batching
-|- extract.py                  # OpenWebText .xz extraction + vocab dump utility
-|- generate.py                 # Inference script (loads checkpoint and generates text)
-|- training.py                 # Main model/training implementation (monolithic script)
-|- wizard_of_oz.txt            # Default training text corpus
-|- requirements.txt            # Python dependencies
-|- Research/                   # Learning notes + notebooks + tuning guides
+├── config.py           # Centralized hyperparameters & hardware config
+├── model.py            # Core Transformer architecture (GQA, RoPE, SwiGLU)
+├── tokenizer.py        # High-performance BPE wrapper (HuggingFace tokenizers)
+├── dataset.py          # Memory-mapped (np.memmap) data loading
+├── prepare_data.py     # Data factory: Parquet -> Tokenization -> Binary Binaries
+├── training.py         # Main production training loop with bfloat16 & Checkpoints
+├── generate.py         # Inference script with auto-checkpoint detection
+├── Research/           # Notebooks and research notes for iterative learning
+└── checkpoints/        # Directory containing saved model states (.pt)
 ```
 
-## Current Model/Training Configuration
+## 🛠️ Setup
 
-Defined in `config.py`:
+1. **Install Dependencies**:
+   ```bash
+   pip install --upgrade --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements.txt
+   ```
 
-- `batch_size = 32`
-- `block_size = 128`
-- `max_iters = 20000`
-- `learning_rate = 3e-4`
-- `eval_iters = 200`
-- `n_embd = 256`
-- `n_head = 8`
-- `n_layer = 6`
-- `dropout = 0.1`
-- `DATA_FILE = "wizard_of_oz.txt"`
+2. **Prepare the Dataset**:
+   Ensure your local Parquet files are at the path specified in `config.py` (Default: `D:\Dataset`).
+   ```bash
+   python prepare_data.py
+   ```
+   *This trains the 32k tokenizer and creates `train.bin` and `val.bin`.*
 
-Device auto-selection priority:
-1. CUDA
-2. Apple MPS
-3. CPU
+## 📈 Training
 
-## Setup
-
-### 1. Create and activate a virtual environment
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-Windows CMD:
-
-```cmd
-python -m venv .venv
-.venv\Scripts\activate.bat
-```
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-If you want CUDA wheels for PyTorch (supported NVIDIA setup):
-
-```bash
-pip install --upgrade --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements.txt
-```
-
-## How To Run
-
-### Train
-
+To start or resume training:
 ```bash
 python training.py
 ```
+- Logs progress every 100 steps.
+- Evaluates on Validation data every 500 steps.
+- Performs a full checkpoint save every 2,500 steps.
 
-Expected output includes periodic train/val loss logs and a saved checkpoint:
-- `model-01.pt`
+### 🔄 Resetting / Starting From Scratch
 
-### Generate text from checkpoint
+If you want to wipe all progress and start training the model from step 0:
+1. **Clear Checkpoints**: Delete the `checkpoints/` folder.
+   ```bash
+   rm -rf checkpoints/
+   ```
+2. **Clear Data (Optional)**: If you want to re-run the tokenizer training or use a different sample size, delete the binary files and the tokenizer JSON:
+   ```bash
+   rm train.bin val.bin bpe_tokenizer_32k.json
+   ```
+3. **Run Pipeline**: Run `python prepare_data.py` followed by `python training.py`.
 
+## 💬 Text Generation
+
+To generate text from your latest checkpoint:
 ```bash
-python generate.py --prompt "Once upon a time" --max-tokens 200 --checkpoint model-01.pt
+python generate.py --prompt "The future of AI is" --max-tokens 100
 ```
+- Automatically finds the highest-numbered checkpoint in `checkpoints/`.
+- Uses top-k sampling and temperature control for high-quality output.
 
-### Build text files from OpenWebText `.xz` archives
+## 📝 Design Decisions
 
-```bash
-python extract.py
-```
+- **`uint16` Dataset**: Token IDs are stored as 16-bit integers to reduce disk footprint by 4x.
+- **Memory Mapping**: Training reads directly from disk using `np.memmap`, allowing 100GB+ datasets to be trained on machines with low RAM.
+- **Weight Tying**: Shares weights between the token embedding and the language modeling head to reduce parameter count.
 
-This creates:
-- `output_train.txt`
-- `output_val.txt`
-- `vocab.txt`
-
-## Research Folder
-
-The `Research/` directory contains:
-- Step-by-step notebook walkthroughs for tokenizer, embeddings, attention, and full architecture
-- Tuning and setup guides (including GPU-specific notes)
-- Experimental checkpoints/notebook artifacts
-
-These files are useful if you want the theory and experimentation context behind the implementation.
-
-## Important Notes (Current State)
-
-- `generate.py` and `dataset.py` reference `model.py` and/or `tokenizer.py`, but these files are not currently in the project root.
-- `training.py` is currently the most complete implementation and includes model classes inline.
-- `app.py` exists but is empty.
-
-If you plan to use modular imports (`model.py`, `tokenizer.py`), add those files or refactor `training.py` into separate modules.
-
-## Suggested Next Improvements
-
-1. Split `training.py` into `model.py`, `tokenizer.py`, and `train.py`.
-2. Add a simple `argparse` interface for training hyperparameters.
-3. Add a train/validation text split pipeline used consistently by all scripts.
-4. Save tokenizer artifacts (`stoi/itos` or vocab) with checkpoints.
-5. Add a quick smoke test and reproducibility seed setup.
-
-## License
-
-See `LICENSE` for project licensing details.
+## 📜 License
+See `LICENSE` for details.
