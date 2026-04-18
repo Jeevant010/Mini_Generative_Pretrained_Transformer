@@ -14,7 +14,7 @@ max_iters = 50000
 learning_rate = 2.5e-4
 eval_iters = 100
 eval_interval = 500
-checkpoint_interval = 2500
+checkpoint_interval = 1000
 
 # --- Model Architecture (rtx_4060_quality) ---
 n_embd = 768
@@ -29,3 +29,7 @@ vocab_size = 32000
 TRAIN_BIN = "train.bin"
 VAL_BIN = "val.bin"
 TOKENIZER_PATH = "bpe_tokenizer_32k.json"
+
+# --- Profiling ---
+ENABLE_PROFILING = True
+PROFILING_WINDOW = (100, 110) # Start, End step
