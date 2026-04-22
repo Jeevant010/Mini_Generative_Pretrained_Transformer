@@ -33,3 +33,8 @@ TOKENIZER_PATH = "bpe_tokenizer_32k.json"
 # --- Profiling ---
 ENABLE_PROFILING = True
 PROFILING_WINDOW = (100, 110) # Start, End step
+
+# --- Iteration Timer ---
+# Set to an integer step index (e.g., 250) to print detailed timing for only that step.
+# Set to None to disable.
+TIMER_TARGET_ITERATION = 1000

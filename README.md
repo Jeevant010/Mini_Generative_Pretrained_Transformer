@@ -71,6 +71,62 @@ python generate.py --prompt "The future of AI is" --max-tokens 100
 - Automatically finds the highest-numbered checkpoint in `checkpoints/`.
 - Uses top-k sampling and temperature control for high-quality output.
 
+## 🔍 Profiler Logs (How to View)
+
+PyTorch profiler traces are saved in:
+
+```text
+log/profiler/
+```
+
+Files look like this:
+
+```text
+Deepesh-Pc_10640.1776590615742375000.pt.trace.json
+```
+
+### Option 1: Open in Chrome/Edge Trace Viewer (Fastest)
+
+1. Open `chrome://tracing` in Chrome (or `edge://tracing` in Edge).
+2. Click **Load**.
+3. Select any `*.pt.trace.json` file from `log/profiler/`.
+
+You can now inspect CPU/GPU timeline events, kernel launches, and step durations.
+
+### Option 2: Open in Perfetto UI
+
+1. Open https://ui.perfetto.dev
+2. Click **Open trace file**.
+3. Select a `*.pt.trace.json` file from `log/profiler/`.
+
+Perfetto provides a modern timeline UI and better navigation for larger traces.
+
+### Option 3: Launch with TensorBoard (Profile Plugin)
+
+From the project root, run:
+
+```bash
+tensorboard --logdir log/profiler --port 6006
+```
+
+Then open:
+
+```text
+http://localhost:6006
+```
+
+If TensorBoard is not installed:
+
+```bash
+pip install tensorboard
+```
+
+### Quick Check (Windows PowerShell)
+
+```powershell
+Get-ChildItem .\log\profiler\*.pt.trace.json
+```
+
 ## 📝 Design Decisions
 
 - **`uint16` Dataset**: Token IDs are stored as 16-bit integers to reduce disk footprint by 4x.

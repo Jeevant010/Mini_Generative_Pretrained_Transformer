@@ -2,7 +2,8 @@ import os
 import time
 import math
 from typing import Optional, Tuple, Dict, List
-
+from datetime import datetime
+from matplotlib.pyplot import step
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -59,6 +60,20 @@ def train():
         start_step = checkpoint['step'] + 1
 
     model.train()
+    timer_target_iteration = getattr(config, "TIMER_TARGET_ITERATION", None)
+    effective_timer_iteration = timer_target_iteration
+    if timer_target_iteration is None:
+        print("Iteration timer: disabled (TIMER_TARGET_ITERATION=None)")
+    else:
+        if timer_target_iteration < start_step:
+            effective_timer_iteration = start_step
+            print(
+                f"Iteration timer: requested step {timer_target_iteration}, "
+                f"but training resumes at step {start_step}. "
+                f"Timer will run at step {effective_timer_iteration}."
+            )
+        else:
+            print(f"Iteration timer: enabled for step {effective_timer_iteration}.")
     
     # --- Profiler Setup ---
     prof = None
@@ -74,21 +89,63 @@ def train():
 
     for step in range(start_step, config.max_iters):
         t0 = time.perf_counter()
+        timer_enabled_for_step = (
+            effective_timer_iteration is not None and step == effective_timer_iteration
+        )
+        if timer_enabled_for_step:
+            iteration_start_wall = time.time()
+            # print(f"\n[Step {step}] Start time: {iteration_start_wall:.4f} s")
+
+            t_data0 = time.perf_counter()
         
         # Optimization Step
         xb, yb = get_batch("train")
+        if timer_enabled_for_step:
+            t_data1 = time.perf_counter()
         
         with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.bfloat16):
+            if timer_enabled_for_step:
+                t_fwd0 = time.perf_counter()
             logits, loss = model(xb, yb)
+            if timer_enabled_for_step:
+                t_fwd1 = time.perf_counter()
         
+        if timer_enabled_for_step:
+            t_bwd0 = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        if timer_enabled_for_step:
+            t_bwd1 = time.perf_counter()
+
+        if timer_enabled_for_step:
+            t_opt0 = time.perf_counter()
         optimizer.step()
+        if timer_enabled_for_step:
+            t_opt1 = time.perf_counter()
         
         if prof: prof.step()
         
         t1 = time.perf_counter()
         dt = t1 - t0 # seconds per step
+
+        if timer_enabled_for_step:
+            iteration_end_wall = time.time()
+            data_ms = (t_data1 - t_data0) * 1000
+            fwd_ms = (t_fwd1 - t_fwd0) * 1000
+            bwd_ms = (t_bwd1 - t_bwd0) * 1000
+            opt_ms = (t_opt1 - t_opt0) * 1000
+            step_ms = dt * 1000
+            print("\n" + "=" * 50)
+            print(f"⏱ ITERATION TIMER (step {step})")
+            print("=" * 50)
+            print(f"\n[Step {step}] Start time: {iteration_start_wall:.4f} s")
+            print(f"End time           : {iteration_end_wall:.4f} s")
+            print(f"Data load          : {data_ms:.2f} ms")
+            print(f"Forward pass       : {fwd_ms:.2f} ms")
+            print(f"Backward pass      : {bwd_ms:.2f} ms")
+            print(f"Optimizer step     : {opt_ms:.2f} ms")
+            print(f"Full step          : {step_ms:.2f} ms")
+            print("=" * 50 + "\n")
 
         # Monitoring
         if step % 100 == 0:
@@ -103,13 +160,16 @@ def train():
             print("🚀 HARDWARE PROFILING REPORT")
             print("="*50)
             
-            # Simple latency table
+            # Detailed performance table (Simple & Readable)
+            print("\n" + "-"*20 + " TOP 10 OPERATORS (by CUDA time) " + "-"*20)
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+            print("-" * 75)
+            
             print(f"{'Metric':<25} | {'Value':<15}")
             print("-" * 45)
             print(f"{'Tokens / Second':<25} | {tokens_per_batch/dt:,.0f}")
             print(f"{'TFLOPS (Peak Approx)':<25} | {flops_per_step/dt/1e12:.2f}")
             print(f"{'Step Latency':<25} | {dt*1000:.2f} ms")
-            print(f"{'Data Transfer (HtoD)':<25} | Check Chrome Trace")
             
             # Export Chrome Trace
             trace_path = "performance_trace.json"
