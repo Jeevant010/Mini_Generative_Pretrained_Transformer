@@ -1,17 +1,11 @@
 import os
 import time
 import math
-from typing import Optional, Tuple, Dict, List
-from datetime import datetime
-from matplotlib.pyplot import step
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
 
 import config
 from dataset import get_batch
-from tokenizer import BytePairTokenizer
 from model import GPTLanguageModel # <--- Importing from the new modular model.py
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,7 +26,56 @@ def estimate_loss(model, eval_iters):
     model.train()
     return out
 
+def get_lr(step):
+    warmup_iters = getattr(config, "warmup_iters", 0)
+    lr_decay_iters = getattr(config, "lr_decay_iters", config.max_iters)
+    min_lr = getattr(config, "min_lr", config.learning_rate)
+
+    if warmup_iters > 0 and step < warmup_iters:
+        return config.learning_rate * (step + 1) / warmup_iters
+
+    if step > lr_decay_iters:
+        return min_lr
+
+    if lr_decay_iters <= warmup_iters:
+        return config.learning_rate
+
+    decay_ratio = (step - warmup_iters) / (lr_decay_iters - warmup_iters)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return min_lr + coeff * (config.learning_rate - min_lr)
+
+def validate_training_setup():
+    if config.batch_size <= 0:
+        raise ValueError("batch_size must be greater than 0.")
+    if config.block_size <= 1:
+        raise ValueError("block_size must be greater than 1.")
+    if config.max_iters <= 0:
+        raise ValueError("max_iters must be greater than 0.")
+    if config.eval_iters <= 0:
+        raise ValueError("eval_iters must be greater than 0.")
+    if config.eval_interval <= 0:
+        raise ValueError("eval_interval must be greater than 0.")
+    if config.checkpoint_interval <= 0:
+        raise ValueError("checkpoint_interval must be greater than 0.")
+    if getattr(config, "warmup_iters", 0) < 0:
+        raise ValueError("warmup_iters must be >= 0.")
+    if getattr(config, "lr_decay_iters", config.max_iters) <= 0:
+        raise ValueError("lr_decay_iters must be greater than 0.")
+    if getattr(config, "min_lr", config.learning_rate) < 0:
+        raise ValueError("min_lr must be >= 0.")
+
+    for split_name, path in [("train", config.TRAIN_BIN), ("val", config.VAL_BIN)]:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"{split_name} binary file not found: {path}")
+        token_count = os.path.getsize(path) // 2  # uint16 tokens
+        if token_count <= config.block_size + 1:
+            raise ValueError(
+                f"{split_name} split is too small for block_size={config.block_size}: "
+                f"found {token_count} tokens in {path}."
+            )
+
 def train():
+    validate_training_setup()
     os.makedirs("checkpoints", exist_ok=True)
     device = config.device
     print(f"Starting production training on {device}...")
@@ -50,6 +93,7 @@ def train():
     
     # Check for latest checkpoint
     start_step = 0
+    best_val_loss = float("inf")
     ckpts = [f for f in os.listdir("checkpoints") if f.startswith("ckpt_step_")]
     if ckpts:
         latest = sorted(ckpts, key=lambda x: int(x.split("_")[-1].split(".")[0]))[-1]
@@ -58,6 +102,7 @@ def train():
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_step = checkpoint['step'] + 1
+        best_val_loss = checkpoint.get("best_val_loss", float("inf"))
 
     model.train()
     timer_target_iteration = getattr(config, "TIMER_TARGET_ITERATION", None)
@@ -89,6 +134,9 @@ def train():
 
     for step in range(start_step, config.max_iters):
         t0 = time.perf_counter()
+        lr = get_lr(step)
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr
         timer_enabled_for_step = (
             effective_timer_iteration is not None and step == effective_timer_iteration
         )
@@ -114,6 +162,8 @@ def train():
             t_bwd0 = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        if getattr(config, "grad_clip", 0.0) and config.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         if timer_enabled_for_step:
             t_bwd1 = time.perf_counter()
 
@@ -151,7 +201,7 @@ def train():
         if step % 100 == 0:
             tokens_per_sec = tokens_per_batch / dt
             tflops = flops_per_step / dt / 1e12
-            print(f"Step {step:5d} | Loss: {loss.item():.4f} | {tokens_per_sec:,.0f} tok/s | {tflops:.2f} TFLOPS")
+            print(f"Step {step:5d} | Loss: {loss.item():.4f} | LR: {lr:.6e} | {tokens_per_sec:,.0f} tok/s | {tflops:.2f} TFLOPS")
 
         # Handle profiling results
         if config.ENABLE_PROFILING and step == config.PROFILING_WINDOW[1]:
@@ -183,7 +233,21 @@ def train():
         # Evaluation
         if step % config.eval_interval == 0 or step == config.max_iters - 1:
             losses = estimate_loss(model, config.eval_iters)
-            print(f">>> EVAL Step {step:5d}: train_loss {losses['train']:.4f} | val_loss {losses['val']:.4f}")
+            train_loss = losses["train"]
+            val_loss = losses["val"]
+            print(f">>> EVAL Step {step:5d}: train_loss {train_loss:.4f} | val_loss {val_loss:.4f}")
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_ckpt_path = os.path.join("checkpoints", "best_model.pt")
+                torch.save({
+                    'step': step,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'loss': loss.item(),
+                    'best_val_loss': best_val_loss,
+                }, best_ckpt_path)
+                print(f"New best model saved: {best_ckpt_path} | best_val_loss: {best_val_loss:.4f}")
 
         # Checkpointing
         if step > 0 and step % config.checkpoint_interval == 0:
@@ -193,6 +257,7 @@ def train():
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss.item(),
+                'best_val_loss': best_val_loss,
             }, ckpt_path)
             print(f"💾 Checkpoint saved: {ckpt_path}")
 
