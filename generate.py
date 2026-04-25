@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--prompt", type=str, default="Once upon a time", help="Seed prompt.")
     parser.add_argument("--max-tokens", type=int, default=100, help="New tokens to generate.")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint (defaults to latest).")
+    parser.add_argument("--save", type=str, help="Path to save the output (optional).")
     args = parser.parse_args()
 
     # 1. Setup Device
@@ -65,6 +66,15 @@ def main():
     generated_text = tokenizer.decode(output_ids[0].tolist(), skip_special_tokens=True)
     print(generated_text)
     print(f"{'─'*50}")
+
+    # Save if requested
+    if args.save:
+        with open(args.save, "w", encoding="utf-8") as f:
+            f.write(f"Prompt: {args.prompt}\n")
+            f.write(f"{'─'*50}\n")
+            f.write(generated_text + "\n")
+            f.write(f"{'─'*50}\n")
+        print(f"Output saved to {args.save}")
 
 if __name__ == "__main__":
     main()
