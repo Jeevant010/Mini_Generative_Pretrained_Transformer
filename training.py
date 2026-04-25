@@ -1,4 +1,20 @@
+"""
+training.py — Production training loop with integrated evaluation suite.
+
+Features:
+    - Cosine LR with warmup
+    - Mixed-precision (bfloat16)
+    - Gradient clipping & norm tracking
+    - Periodic evaluation with Perplexity (PPL)
+    - Sample text generation at eval intervals
+    - VRAM monitoring (CUDA)
+    - CSV metrics logging (logs/training_metrics.csv)
+    - Checkpoint resume (automatic)
+    - PyTorch profiler integration
+"""
+
 import os
+import csv
 import time
 import math
 import torch
@@ -6,10 +22,10 @@ from torch.profiler import profile, ProfilerActivity
 
 import config
 from dataset import get_batch
-from model import GPTLanguageModel # <--- Importing from the new modular model.py
+from model import GPTLanguageModel  # <--- Importing from the new modular model.py
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Training Loop
+# Evaluation & Logging Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
@@ -25,6 +41,7 @@ def estimate_loss(model, eval_iters):
         out[split] = sum(losses) / eval_iters
     model.train()
     return out
+
 
 def get_lr(step):
     warmup_iters = getattr(config, "warmup_iters", 0)
@@ -43,6 +60,7 @@ def get_lr(step):
     decay_ratio = (step - warmup_iters) / (lr_decay_iters - warmup_iters)
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return min_lr + coeff * (config.learning_rate - min_lr)
+
 
 def validate_training_setup():
     if config.batch_size <= 0:
@@ -74,11 +92,55 @@ def validate_training_setup():
                 f"found {token_count} tokens in {path}."
             )
 
+
+def init_csv_logger():
+    """Initialize CSV metrics logger."""
+    log_dir = getattr(config, "LOG_DIR", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    csv_path = os.path.join(log_dir, "training_metrics.csv")
+    file_exists = os.path.exists(csv_path)
+
+    csv_file = open(csv_path, "a", newline="")
+    writer = csv.writer(csv_file)
+
+    if not file_exists:
+        writer.writerow([
+            "timestamp", "step", "loss", "lr",
+            "tokens_per_sec", "tflops", "grad_norm",
+            "vram_mb", "val_loss", "perplexity",
+        ])
+        csv_file.flush()
+
+    return csv_file, writer
+
+
+def load_tokenizer_safe():
+    """Attempt to load the tokenizer for sample generation."""
+    try:
+        from tokenizer import BytePairTokenizer
+        tok_path = getattr(config, "TOKENIZER_PATH", "bpe_tokenizer_32k.json")
+        if os.path.exists(tok_path):
+            return BytePairTokenizer.load(tok_path)
+    except Exception:
+        pass
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training Loop
+# ─────────────────────────────────────────────────────────────────────────────
+
 def train():
     validate_training_setup()
     os.makedirs("checkpoints", exist_ok=True)
     device = config.device
     print(f"Starting production training on {device}...")
+
+    # Print ablation status
+    print(f"Ablation: RMSNorm={getattr(config, 'USE_RMSNORM', True)} | "
+          f"RoPE={getattr(config, 'USE_ROPE', True)} | "
+          f"FlashAttn={getattr(config, 'USE_FLASH_ATTENTION', True)} | "
+          f"GQA={getattr(config, 'USE_GQA', True)}")
 
     model = GPTLanguageModel(config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
@@ -91,6 +153,21 @@ def train():
     
     print(f"Model Parameters: {num_params/1e6:.2f}M")
     
+    # --- CSV Logger ---
+    csv_file, csv_writer = None, None
+    if getattr(config, "LOG_METRICS_CSV", False):
+        csv_file, csv_writer = init_csv_logger()
+        print(f"CSV logging: logs/training_metrics.csv")
+
+    # --- Tokenizer for sample generation ---
+    tokenizer = None
+    if getattr(config, "GENERATE_SAMPLES", False):
+        tokenizer = load_tokenizer_safe()
+        if tokenizer:
+            print(f"Sample generation: enabled ({len(config.SAMPLE_PROMPTS)} prompts)")
+        else:
+            print("Sample generation: disabled (tokenizer not found)")
+
     # Check for latest checkpoint
     start_step = 0
     best_val_loss = float("inf")
@@ -142,8 +219,6 @@ def train():
         )
         if timer_enabled_for_step:
             iteration_start_wall = time.time()
-            # print(f"\n[Step {step}] Start time: {iteration_start_wall:.4f} s")
-
             t_data0 = time.perf_counter()
         
         # Optimization Step
@@ -162,8 +237,15 @@ def train():
             t_bwd0 = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+
+        # --- Gradient Norm Tracking ---
+        grad_norm = None
         if getattr(config, "grad_clip", 0.0) and config.grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip).item()
+        elif getattr(config, "LOG_GRAD_NORM", False):
+            # Calculate norm without clipping
+            grad_norm = sum(p.grad.norm().item() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
+
         if timer_enabled_for_step:
             t_bwd1 = time.perf_counter()
 
@@ -197,11 +279,42 @@ def train():
             print(f"Full step          : {step_ms:.2f} ms")
             print("=" * 50 + "\n")
 
+        # --- VRAM Tracking ---
+        vram_mb = None
+        if getattr(config, "LOG_VRAM", False) and "cuda" in str(device):
+            vram_mb = torch.cuda.max_memory_allocated(device) / (1024 * 1024)
+
         # Monitoring
         if step % 100 == 0:
             tokens_per_sec = tokens_per_batch / dt
             tflops = flops_per_step / dt / 1e12
-            print(f"Step {step:5d} | Loss: {loss.item():.4f} | LR: {lr:.6e} | {tokens_per_sec:,.0f} tok/s | {tflops:.2f} TFLOPS")
+
+            # Build log line
+            log_parts = [
+                f"Step {step:5d}",
+                f"Loss: {loss.item():.4f}",
+                f"LR: {lr:.6e}",
+                f"{tokens_per_sec:,.0f} tok/s",
+                f"{tflops:.2f} TFLOPS",
+            ]
+            if grad_norm is not None and getattr(config, "LOG_GRAD_NORM", False):
+                log_parts.append(f"GradNorm: {grad_norm:.2f}")
+            if vram_mb is not None:
+                log_parts.append(f"VRAM: {vram_mb:.0f}MB")
+
+            print(" | ".join(log_parts))
+
+            # CSV logging
+            if csv_writer:
+                csv_writer.writerow([
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                    step, f"{loss.item():.6f}", f"{lr:.8e}",
+                    f"{tokens_per_sec:.0f}", f"{tflops:.4f}",
+                    f"{grad_norm:.4f}" if grad_norm else "",
+                    f"{vram_mb:.0f}" if vram_mb else "",
+                    "", "",  # val_loss and perplexity filled at eval
+                ])
+                csv_file.flush()
 
         # Handle profiling results
         if config.ENABLE_PROFILING and step == config.PROFILING_WINDOW[1]:
@@ -235,7 +348,33 @@ def train():
             losses = estimate_loss(model, config.eval_iters)
             train_loss = losses["train"]
             val_loss = losses["val"]
-            print(f">>> EVAL Step {step:5d}: train_loss {train_loss:.4f} | val_loss {val_loss:.4f}")
+            ppl = math.exp(val_loss) if val_loss < 20 else float("inf")
+
+            print(f">>> EVAL Step {step:5d}: train_loss {train_loss:.4f} | val_loss {val_loss:.4f} | PPL {ppl:.2f}")
+
+            # CSV log for eval
+            if csv_writer:
+                csv_writer.writerow([
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                    step, f"{train_loss:.6f}", f"{lr:.8e}",
+                    "", "", "", "",
+                    f"{val_loss:.6f}", f"{ppl:.2f}",
+                ])
+                csv_file.flush()
+
+            # --- Sample Generation ---
+            if tokenizer and getattr(config, "GENERATE_SAMPLES", False):
+                try:
+                    from evaluation.sample_generator import generate_and_log_samples
+                    samples = generate_and_log_samples(model, tokenizer, step, config)
+                    print(f"  📝 Samples saved to: logs/samples/step_{step}.txt")
+                    # Print first sample preview
+                    if samples:
+                        prompt, text = samples[0]
+                        preview = text[:120] + "..." if len(text) > 120 else text
+                        print(f"  Preview: \"{preview}\"")
+                except Exception as e:
+                    print(f"  ⚠ Sample generation failed: {e}")
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -260,6 +399,10 @@ def train():
                 'best_val_loss': best_val_loss,
             }, ckpt_path)
             print(f"💾 Checkpoint saved: {ckpt_path}")
+
+    # Cleanup
+    if csv_file:
+        csv_file.close()
 
     print("✅ Training Complete.")
 

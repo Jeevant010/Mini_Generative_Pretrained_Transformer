@@ -89,6 +89,34 @@ checkpoints/
 *.json
 graphify-out/
 
+# --- Mini GPT Project Specific ---
+# Training logs & generated samples (regenerated, not needed in git)
+logs/
+subsets/
+
+# Ablation temporary data (created by run_ablation.py from wizard_of_oz.txt)
+ablation/_data/
+
+# Notebook temporary data and generated plots
+notebooks/_ablation_data/
+notebooks/*.png
+
+# Large data files
+*.bin
+*.pt
+
+# Profiler traces
+performance_trace.json
+log/profiler/
+
+# BUT DO track these important files:
+!requirements.txt
+!*.py
+!manuals/**
+!Research/*.md
+!wizard_of_oz.txt
+!LICENSE
+
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
