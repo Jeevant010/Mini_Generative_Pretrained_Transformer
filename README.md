@@ -1,137 +1,302 @@
-# Mini Generative Pretrained Transformer (Production Edition)
+# Mini Generative Pretrained Transformer
 
-A high-performance, production-ready implementation of a Small Language Model (SLM) using PyTorch. This project features a modern Transformer architecture optimized for local hardware (NVIDIA RTX 40-series) and can efficiently train on large datasets like OpenWebText.
+A compact GPT-style language model training project built with PyTorch. The repo uses a modern decoder-only architecture with:
 
-## 🚀 Key Features
+- Grouped-Query Attention (GQA)
+- RoPE positional encoding
+- RMSNorm
+- SwiGLU feed-forward blocks
+- tied token embedding / LM head weights
 
-- **Modern Architecture**: Implements **GQA** (Grouped-Query Attention), **RoPE** (Rotary Positional Embeddings), **SwiGLU** activation, and **RMSNorm**.
-- **Production Data Pipeline**: Streams local Parquet files, trains a high-speed BPE tokenizer (Rust-powered), and generates memory-mapped binary datasets for zero-latency training.
-- **Hardware Optimized**: Native support for **`bfloat16`** mixed-precision training on NVIDIA Ada Lovelace GPUs (RTX 4060/4070/4080/4090).
-- **Auto-Resume**: Robust checkpointing system that automatically saves progress and resumes from the latest state.
-- **Modular Design**: Clean separation between model architecture, tokenizer, data loading, and training logic.
+It is designed to train from local parquet shards, write tokenized binaries to disk, and train from memory-mapped data without loading the full corpus into RAM.
 
-## 📁 Repository Structure
+## Repo Layout
 
 ```text
 Mini_Generative_Pretrained_Transformer/
-├── config.py           # Centralized hyperparameters & hardware config
-├── model.py            # Core Transformer architecture (GQA, RoPE, SwiGLU)
-├── tokenizer.py        # High-performance BPE wrapper (HuggingFace tokenizers)
-├── dataset.py          # Memory-mapped (np.memmap) data loading
-├── prepare_data.py     # Data factory: Parquet -> Tokenization -> Binary Binaries
-├── training.py         # Main production training loop with bfloat16 & Checkpoints
-├── generate.py         # Inference script with auto-checkpoint detection
-├── Research/           # Notebooks and research notes for iterative learning
-└── checkpoints/        # Directory containing saved model states (.pt)
+|-- config.py
+|-- prepare_data.py
+|-- dataset.py
+|-- model.py
+|-- training.py
+|-- generate.py
+|-- tokenizer.py
+|-- checkpoints/
+`-- Research/
 ```
 
-## 🛠️ Setup
+## Current Defaults
 
-1. **Install Dependencies**:
-   ```bash
-   pip install --upgrade --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements.txt
-   ```
+The current default config in [config.py](config.py) is:
 
-2. **Prepare the Dataset**:
-   Ensure your local Parquet files are at the path specified in `config.py` (Default: `D:\Dataset`).
-   ```bash
-   python prepare_data.py
-   ```
-   *This trains the 32k tokenizer and creates `train.bin` and `val.bin`.*
+- `batch_size = 20`
+- `block_size = 384`
+- `max_iters = 300000`
+- `learning_rate = 2.5e-4`
+- `min_lr = 2.5e-5`
+- `warmup_iters = 2000`
+- `lr_decay_iters = max_iters`
+- `grad_clip = 1.0`
+- `eval_iters = 25`
+- `eval_interval = 2000`
+- `checkpoint_interval = 5000`
+- `vocab_size = 32000`
 
-## 📈 Training
+Data artifacts are expected at:
 
-To start or resume training:
-```bash
+- `train.bin`
+- `val.bin`
+- `bpe_tokenizer_32k.json`
+
+## What The Pipeline Does
+
+`prepare_data.py`
+- scans local parquet shards from `DATASET_PATH`
+- reads parquet row groups directly instead of building a temporary Arrow cache
+- trains a tokenizer if one does not already exist
+- tokenizes the corpus
+- streams token IDs directly to `train.bin` and `val.bin`
+
+`dataset.py`
+- opens the training binaries with `np.memmap`
+- samples random windows for each batch
+- moves only the current batch to the GPU
+
+`training.py`
+- validates the setup before starting
+- auto-resumes from the latest `ckpt_step_*.pt`
+- logs loss, LR, throughput, and TFLOPS
+- saves periodic checkpoints
+- saves `checkpoints/best_model.pt` when validation loss improves
+
+`generate.py`
+- loads the tokenizer
+- loads a checkpoint
+- generates text from a prompt
+
+## Setup
+
+Create or activate your Python environment, then install dependencies:
+
+```powershell
+pip install --upgrade --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements.txt
+```
+
+## Configure The Dataset
+
+Before preprocessing, open [prepare_data.py](prepare_data.py) and set:
+
+```python
+DATASET_PATH = r"D:\Openweb"
+```
+
+That folder should contain your parquet shards.
+
+The preprocessing step now reads those parquet files directly, which avoids the large temporary `datasets` Arrow cache that can exhaust disk space on very large corpora.
+
+If you want different output filenames, update these in [config.py](config.py):
+
+```python
+TRAIN_BIN = "train.bin"
+VAL_BIN = "val.bin"
+TOKENIZER_PATH = "bpe_tokenizer_32k.json"
+```
+
+`prepare_data.py`, `dataset.py`, `training.py`, and `generate.py` now all use those config paths consistently.
+
+## How To Run
+
+### 1. Prepare The Data
+
+From the project root:
+
+```powershell
+python prepare_data.py
+```
+
+This will:
+
+- train the tokenizer if `bpe_tokenizer_32k.json` does not exist
+- create `train.bin`
+- create `val.bin`
+
+### 2. Train The Model
+
+```powershell
 python training.py
 ```
-- Logs progress every 100 steps.
-- Evaluates on Validation data every 500 steps.
-- Performs a full checkpoint save every 2,500 steps.
 
-### 🔄 Resetting / Starting From Scratch
+Training behavior:
 
-If you want to wipe all progress and start training the model from step 0:
-1. **Clear Checkpoints**: Delete the `checkpoints/` folder.
-   ```bash
-   rm -rf checkpoints/
-   ```
-2. **Clear Data (Optional)**: If you want to re-run the tokenizer training or use a different sample size, delete the binary files and the tokenizer JSON:
-   ```bash
-   rm train.bin val.bin bpe_tokenizer_32k.json
-   ```
-3. **Run Pipeline**: Run `python prepare_data.py` followed by `python training.py`.
+- validates that `train.bin` and `val.bin` exist and are large enough
+- resumes automatically from the latest `checkpoints/ckpt_step_*.pt` if present
+- prints a training log every 100 steps
+- runs evaluation every `eval_interval`
+- saves periodic checkpoints every `checkpoint_interval`
+- saves `checkpoints/best_model.pt` whenever validation loss improves
 
-## 💬 Text Generation
+### 3. Resume Training
 
-To generate text from your latest checkpoint:
-```bash
+No special command is needed. Just run:
+
+```powershell
+python training.py
+```
+
+If checkpoints exist, training resumes automatically.
+
+### 4. Generate Text
+
+Use the latest step checkpoint:
+
+```powershell
 python generate.py --prompt "The future of AI is" --max-tokens 100
 ```
-- Automatically finds the highest-numbered checkpoint in `checkpoints/`.
-- Uses top-k sampling and temperature control for high-quality output.
 
-## 🔍 Profiler Logs (How to View)
+Use a specific checkpoint, including the best validation model:
 
-PyTorch profiler traces are saved in:
+```powershell
+python generate.py --checkpoint checkpoints/best_model.pt --prompt "The future of AI is" --max-tokens 100
+```
+
+## Recommended Workflow
+
+For a first sanity check:
+
+1. Set smaller values in `config.py`, such as lower `max_iters`.
+2. Run `python prepare_data.py`.
+3. Run `python training.py`.
+4. Confirm that `checkpoints/` contains both step checkpoints and `best_model.pt`.
+5. Run `python generate.py` on one of those checkpoints.
+
+After that, scale the training run gradually.
+
+## Smoke Test Before A Long Run
+
+Before launching the full training job, do one short validation run to confirm that:
+
+- data preprocessing completed correctly
+- `train.bin` and `val.bin` are readable
+- training starts without setup errors
+- checkpoints are written
+- resume works
+- generation works from a produced checkpoint
+
+Temporarily change these values in [config.py](config.py):
+
+```python
+max_iters = 300
+eval_iters = 10
+eval_interval = 100
+checkpoint_interval = 150
+ENABLE_PROFILING = False
+TIMER_TARGET_ITERATION = None
+```
+
+Then run:
+
+```powershell
+python training.py
+```
+
+During the smoke test, check that:
+
+- step logs appear normally
+- LR is shown in the training log
+- evaluation runs at least once
+- a file like `checkpoints/ckpt_step_150.pt` appears
+- `checkpoints/best_model.pt` appears
+
+Then run training one more time:
+
+```powershell
+python training.py
+```
+
+This second launch should resume from the existing checkpoint instead of starting from step 0.
+
+Finally, test generation:
+
+```powershell
+python generate.py --checkpoint checkpoints/best_model.pt --prompt "The future of AI is" --max-tokens 80
+```
+
+If all of that works, restore your long-run values in `config.py` and start the full run.
+
+## Notes For Larger Datasets
+
+The preprocessing path is now stream-based, which means token IDs are written to disk incrementally instead of being collected in Python lists first. That makes it much more suitable for large datasets.
+
+The training path reads batches from memory-mapped binaries, so the full dataset stays on disk. Only the sampled batch is moved to the GPU each step.
+
+## Optional Learning Rate Schedule
+
+`training.py` supports these optional config fields:
+
+```python
+warmup_iters = 2000
+lr_decay_iters = max_iters
+min_lr = 2.5e-5
+```
+
+If they are not present in `config.py`, training falls back to a constant learning rate.
+
+## Profiling
+
+Profiling is controlled in [config.py](config.py):
+
+```python
+ENABLE_PROFILING = True
+PROFILING_WINDOW = (100, 110)
+```
+
+For normal long training runs, setting `ENABLE_PROFILING = False` is usually a better default.
+
+Profiler traces are written under:
 
 ```text
 log/profiler/
 ```
 
-Files look like this:
+You can inspect them with TensorBoard, Chrome tracing, or Perfetto.
 
-```text
-Deepesh-Pc_10640.1776590615742375000.pt.trace.json
-```
+## Checkpoints
 
-### Option 1: Open in Chrome/Edge Trace Viewer (Fastest)
+The project uses two checkpoint types:
 
-1. Open `chrome://tracing` in Chrome (or `edge://tracing` in Edge).
-2. Click **Load**.
-3. Select any `*.pt.trace.json` file from `log/profiler/`.
+- `checkpoints/ckpt_step_<N>.pt`
+- `checkpoints/best_model.pt`
 
-You can now inspect CPU/GPU timeline events, kernel launches, and step durations.
+`ckpt_step_<N>.pt` is for periodic resume.
 
-### Option 2: Open in Perfetto UI
+`best_model.pt` tracks the best validation loss seen so far.
 
-1. Open https://ui.perfetto.dev
-2. Click **Open trace file**.
-3. Select a `*.pt.trace.json` file from `log/profiler/`.
+## Useful Commands
 
-Perfetto provides a modern timeline UI and better navigation for larger traces.
-
-### Option 3: Launch with TensorBoard (Profile Plugin)
-
-From the project root, run:
-
-```bash
-tensorboard --logdir log/profiler --port 6006
-```
-
-Then open:
-
-```text
-http://localhost:6006
-```
-
-If TensorBoard is not installed:
-
-```bash
-pip install tensorboard
-```
-
-### Quick Check (Windows PowerShell)
+Prepare data:
 
 ```powershell
-Get-ChildItem .\log\profiler\*.pt.trace.json
+python prepare_data.py
 ```
 
-## 📝 Design Decisions
+Train:
 
-- **`uint16` Dataset**: Token IDs are stored as 16-bit integers to reduce disk footprint by 4x.
-- **Memory Mapping**: Training reads directly from disk using `np.memmap`, allowing 100GB+ datasets to be trained on machines with low RAM.
-- **Weight Tying**: Shares weights between the token embedding and the language modeling head to reduce parameter count.
+```powershell
+python training.py
+```
 
-## 📜 License
-See `LICENSE` for details.
+Generate:
+
+```powershell
+python generate.py --prompt "Once upon a time" --max-tokens 100
+```
+
+Syntax check:
+
+```powershell
+python -m py_compile training.py prepare_data.py dataset.py generate.py config.py tokenizer.py model.py
+```
+
+## License
+
+See [LICENSE](LICENSE).
