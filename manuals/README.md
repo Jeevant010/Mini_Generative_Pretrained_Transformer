@@ -29,12 +29,15 @@ manuals/
 │   ├── config_reference.md              ← Every hyperparameter, explained
 │   ├── training_pipeline.md             ← Training loop, LR schedule, checkpointing, profiling
 │   ├── inference_pipeline.md            ← Generation, sampling strategies, checkpoint loading
-│   └── tokenizer_implementation.md      ← BytePairTokenizer class, HuggingFace backend, API
+│   ├── tokenizer_implementation.md      ← BytePairTokenizer class, HuggingFace backend, API
+│   ├── evaluation_metrics.md            ← [NEW] Perplexity, sample generation, VRAM profiling
+│   └── hyperparameter_presets.md        ← [NEW] Pre-computed RTX 4060 safe presets for all scales
 │
 ├── 05_experimental_methodology/
 │   ├── research_notebooks.md            ← Summary of all Research/ notebooks & their purpose
 │   ├── hardware_profiling.md            ← Profiler tooling, TFLOPS measurement, trace analysis
-│   └── training_progression.md          ← From Wizard of Oz to OpenWebText, staged curriculum
+│   ├── training_progression.md          ← From Wizard of Oz to OpenWebText, staged curriculum
+│   └── ablation_studies.md              ← [NEW] Toggle reference, expected results, paper guide
 │
 ├── 06_reproducibility/
 │   ├── environment_setup.md             ← Python, PyTorch, CUDA, dependencies — step by step
@@ -57,7 +60,9 @@ manuals/
 | Write the Theory / Background section       | `02_theoretical_foundations/`                  |
 | Write the System Design / Methods section   | `03_system_architecture/`                     |
 | Cite specific implementation choices        | `04_implementation_details/`                  |
+| Choose hyperparameters for your data scale  | `04_.../hyperparameter_presets.md`             |
 | Describe experiments & ablations            | `05_experimental_methodology/`                |
+| Prove each component matters (ablation)     | `05_.../ablation_studies.md`                   |
 | Enable someone else to reproduce your work  | `06_reproducibility/`                         |
 | Look up a term or find a citation           | `07_appendices/`                              |
 
