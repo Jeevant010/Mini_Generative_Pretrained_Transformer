@@ -59,6 +59,7 @@ LOG_DIR             = "logs"
 LOG_METRICS_CSV     = True    # Write step metrics to logs/training_metrics.csv
 LOG_GRAD_NORM       = True    # Track & print gradient norm after backward pass
 LOG_VRAM            = True    # Track & print peak VRAM usage (CUDA only)
+TRAIN_LOG_INTERVAL  = 1       # Print progress every N training steps
 
 
 
@@ -79,6 +80,38 @@ vocab_size = 32000
 TRAIN_BIN = "train.bin"
 VAL_BIN = "val.bin"
 TOKENIZER_PATH = "bpe_tokenizer_32k.json"
+DATASET_PATH = r"D:\Openweb"
+
+# --- Data Preparation ---
+# These settings control parquet -> train.bin / val.bin conversion in prepare_data.py.
+# Set DATASET_TARGET_SIZE_GB to 10.0 to build a 10GB tokenized subset directly.
+DATASET_TARGET_SIZE_GB = 10.0
+TOKENIZER_SAMPLE_SIZE_MB = 200
+TOKENIZATION_BATCH_SIZE = 128
+VAL_PERCENT = 0.05
+PREP_RANDOM_SEED = 1337
+SKIP_FULL_ROW_COUNT_SCAN = True
+SHUFFLE_PARQUET_FILES = True
+MAX_PARQUET_FILES = None
+
+# Bias the corpus toward clean English web text.
+FILTER_TO_ENGLISH = True
+FILTER_FOR_QUALITY = True
+MIN_DOC_CHARS = 200
+MAX_DOC_CHARS = 50000
+MIN_WORD_COUNT = 50
+MIN_ALPHA_CHAR_RATIO = 0.55
+MIN_ASCII_ALPHA_RATIO = 0.85
+MAX_DIGIT_CHAR_RATIO = 0.20
+MAX_NON_ASCII_CHAR_RATIO = 0.20
+MIN_ENGLISH_STOPWORD_RATIO = 0.02
+MAX_URL_COUNT = 10
+MAX_LINE_REPEAT_RATIO = 0.30
+
+# If your parquet includes metadata columns such as "lang" or "quality_score",
+# prepare_data.py will use them automatically. Set MIN_QUALITY_SCORE only if you
+# know the score scale used by your dataset.
+MIN_QUALITY_SCORE = None
 
 # --- Profiling ---
 ENABLE_PROFILING = False
@@ -99,7 +132,7 @@ TIMER_TARGET_ITERATION = None
 # Estimated training times assume ~10,000 tokens/sec on RTX 4060.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-ACTIVE_PRESET = None  # ← Set to a preset name string to auto-apply
+ACTIVE_PRESET = "subset_10gb"  # ← Set to a preset name string to auto-apply
 
 PRESETS = {
     # ── Quick Ablation Test (wizard_of_oz.txt, ~43K tokens, ~5 minutes) ──
@@ -204,7 +237,7 @@ PRESETS = {
         "warmup_iters": 2000,
         "eval_iters": 25,
         "eval_interval": 2000,
-        "checkpoint_interval": 5000,
+        "checkpoint_interval": 1000,
         "n_embd": 768,
         "n_layer": 12,
         "n_head": 12,

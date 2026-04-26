@@ -81,6 +81,8 @@ def validate_training_setup():
         raise ValueError("lr_decay_iters must be greater than 0.")
     if getattr(config, "min_lr", config.learning_rate) < 0:
         raise ValueError("min_lr must be >= 0.")
+    if getattr(config, "TRAIN_LOG_INTERVAL", 100) <= 0:
+        raise ValueError("TRAIN_LOG_INTERVAL must be greater than 0.")
 
     for split_name, path in [("train", config.TRAIN_BIN), ("val", config.VAL_BIN)]:
         if not os.path.exists(path):
@@ -134,6 +136,8 @@ def train():
     validate_training_setup()
     os.makedirs("checkpoints", exist_ok=True)
     device = config.device
+    train_start_time = time.perf_counter()
+    log_interval = getattr(config, "TRAIN_LOG_INTERVAL", 100)
     print(f"Starting production training on {device}...")
 
     # Print ablation status
@@ -285,17 +289,30 @@ def train():
             vram_mb = torch.cuda.max_memory_allocated(device) / (1024 * 1024)
 
         # Monitoring
-        if step % 100 == 0:
+        if step % log_interval == 0:
             tokens_per_sec = tokens_per_batch / dt
             tflops = flops_per_step / dt / 1e12
+            steps_done = step - start_step + 1
+            elapsed = time.perf_counter() - train_start_time
+            avg_step_time = elapsed / max(steps_done, 1)
+            remaining_steps = max(config.max_iters - step - 1, 0)
+            eta_seconds = remaining_steps * avg_step_time
+            progress_pct = ((step + 1) / config.max_iters) * 100.0
+            eta_h = int(eta_seconds // 3600)
+            eta_m = int((eta_seconds % 3600) // 60)
+            elapsed_h = int(elapsed // 3600)
+            elapsed_m = int((elapsed % 3600) // 60)
 
             # Build log line
             log_parts = [
                 f"Step {step:5d}",
+                f"{progress_pct:6.2f}%",
                 f"Loss: {loss.item():.4f}",
                 f"LR: {lr:.6e}",
                 f"{tokens_per_sec:,.0f} tok/s",
                 f"{tflops:.2f} TFLOPS",
+                f"Elapsed: {elapsed_h:02d}h{elapsed_m:02d}m",
+                f"ETA: {eta_h:02d}h{eta_m:02d}m",
             ]
             if grad_norm is not None and getattr(config, "LOG_GRAD_NORM", False):
                 log_parts.append(f"GradNorm: {grad_norm:.2f}")

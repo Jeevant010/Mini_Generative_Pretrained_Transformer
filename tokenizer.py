@@ -51,6 +51,28 @@ class BytePairTokenizer:
             ids = ids + [self.special_to_id["<eos>"]]
         return ids
 
+    def encode_batch(
+        self,
+        texts: List[str],
+        add_bos: bool = False,
+        add_eos: bool = False,
+    ) -> List[List[int]]:
+        if not texts:
+            return []
+
+        outputs = self.tokenizer.encode_batch(texts)
+        batch_ids = []
+
+        for output in outputs:
+            ids = output.ids
+            if add_bos:
+                ids = [self.special_to_id["<bos>"]] + ids
+            if add_eos:
+                ids = ids + [self.special_to_id["<eos>"]]
+            batch_ids.append(ids)
+
+        return batch_ids
+
     def decode(self, token_ids: List[int], skip_special_tokens: bool = False) -> str:
         return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
 
