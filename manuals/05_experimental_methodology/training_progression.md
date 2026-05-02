@@ -1,87 +1,97 @@
-# Training Progression — From Wizard of Oz to OpenWebText
+# Training Progression
 
-## 1. Staged Development Approach
+## Current Long Run
 
-This project follows a deliberate progression from small-scale experiments to production training:
+The current important run is the `subset_10gb` training run.
 
-```mermaid
-flowchart TD
-    A["Stage 1: Wizard of Oz\n(237 KB, ~43K tokens)"] --> B["Stage 2: Research Notebooks\n(CPU + GPU profiles)"]
-    B --> C["Stage 3: Production Pipeline\n(Modular Python scripts)"]
-    C --> D["Stage 4: OpenWebText Training\n(Millions of documents)"]
+| Item | Value |
+| --- | ---: |
+| Planned steps | 150,000 |
+| Latest observed step | 60,000 |
+| Tokens per step | 7,680 |
+| Token positions seen by 60k | 460,800,000 |
+| Train tokens | 5,100,766,548 |
+| Fraction of train tokens by 60k | 0.0903 |
+
+## Loss Progress
+
+At initialization:
+
+| Step | Validation loss | Perplexity |
+| ---: | ---: | ---: |
+| 0 | 10.539526 | 37,779.67 |
+
+At the latest observed checkpoint:
+
+| Step | Validation loss | Perplexity |
+| ---: | ---: | ---: |
+| 60,000 | 3.517095 | 33.69 |
+
+Perplexity reduction factor:
+
+$$
+\frac{37779.67}{33.69} \approx 1121.4
+$$
+
+## Recent Validation Records
+
+| Step | Train loss | Validation loss | PPL |
+| ---: | ---: | ---: | ---: |
+| 42,000 | 3.618999 | 3.612168 | 37.05 |
+| 44,000 | 3.625918 | 3.600169 | 36.60 |
+| 46,000 | 3.583047 | 3.624296 | 37.50 |
+| 48,000 | 3.561008 | 3.583526 | 36.00 |
+| 50,000 | 3.592763 | 3.598916 | 36.56 |
+| 52,000 | 3.580003 | 3.557480 | 35.07 |
+| 54,000 | 3.527637 | 3.568154 | 35.45 |
+| 56,000 | 3.528134 | 3.560501 | 35.18 |
+| 58,000 | 3.537106 | 3.587802 | 36.15 |
+| 60,000 | 3.504482 | 3.517095 | 33.69 |
+
+The trend is still improving, though individual evaluations are noisy because they average sampled batches.
+
+## Interpreting Samples
+
+The prompt:
+
+```text
+how can i help
 ```
 
----
+produced fluent continuation-style text by 40k and 60k. This is a good sign for base pretraining, but it does not mean the model is instruction-tuned.
 
-## 2. Stage 1: Wizard of Oz Prototyping
+The base model solves:
 
-**Purpose**: Validate end-to-end pipeline correctness before scaling.
+$$
+P(\text{next token} \mid \text{previous tokens})
+$$
 
-| Parameter | Value |
-|-----------|-------|
-| Corpus | The Wonderful Wizard of Oz (single book) |
-| Vocab size | 2,000 (research) |
-| Model scale | ~2.5M parameters |
-| Device | CPU |
-| Training time | Minutes |
+not:
 
-**Validated**: Tokenization, embedding training, attention mechanisms, generation.
+$$
+P(\text{assistant response} \mid \text{user request})
+$$
 
----
+To get chatbot behavior, add a supervised fine-tuning stage with instruction-response data.
 
-## 3. Stage 2: Notebook Curriculum
+## Milestone Interpretation
 
-Progressive model scaling through hardware-aware profiles:
+| Step range | Expected behavior |
+| --- | --- |
+| 0 | Random token predictions |
+| 5k-10k | Basic token statistics and common fragments |
+| 20k-30k | More fluent local syntax |
+| 40k-60k | Coherent paragraphs, topic drift still common |
+| 100k+ | Better consistency expected if validation loss continues improving |
 
-| Profile | Device | Embedding Dim | Layers | Heads | Steps |
-|---------|--------|--------------|--------|-------|-------|
-| `cpu_safe` | CPU | 128 | 4 | 4 | 200 |
-| `cpu_quality` | CPU | 192 | 6 | 6 | 400 |
-| `rtx_4060_balanced` | GPU | 256 | 8 | 8 | 400 |
-| `rtx_4060_quality` | GPU | 384 | 10 | 10 | 800 |
-| `rtx_4060_max` | GPU | 512 | 12 | 12 | 1200 |
+## Recommended Plots
 
-Each profile was tested and validated before moving to the next.
+For the paper, plot from `logs/training_metrics.csv`:
 
----
+- train loss vs step
+- validation loss vs step
+- perplexity vs step
+- tokens/sec vs step
+- VRAM vs step
+- gradient norm vs step
 
-## 4. Stage 3: Production Pipeline
-
-**Transition**: From notebook-based training to modular Python scripts.
-
-Key changes from notebooks:
-- Config centralized in `config.py` (not embedded in cells).
-- Data pipeline reads Parquet directly (not HuggingFace datasets cache).
-- Memory-mapped binary I/O (not in-memory tensors).
-- Automatic checkpoint resume.
-- Separate tokenizer, data, model, training, and generation modules.
-
-Production model config:
-- 768 dim, 12 layers, 12 heads, 4 KV heads (GQA)
-- 32K vocabulary
-- ~93M parameters
-
----
-
-## 5. Stage 4: OpenWebText Training
-
-**Current stage**: Training on the full OpenWebText corpus.
-
-| Parameter | Value |
-|-----------|-------|
-| Corpus | OpenWebText (Parquet shards) |
-| Vocab size | 32,000 |
-| Training steps | 300,000 |
-| Batch size | 20 |
-| Context length | 384 |
-| Tokens per step | 7,680 |
-| Total tokens | ~2.3B |
-
----
-
-## 6. Key Observations Across Stages
-
-1. **Small-scale validation is essential**: Catching bugs on Wizard of Oz saved hours of GPU time.
-2. **Profile-based scaling prevents OOM**: Gradual hardware adaptation was smoother than guessing.
-3. **Modularization improved iteration speed**: Changing one component doesn't require re-running the full pipeline.
-4. **Memory-mapped data was the key enabler**: Without it, OpenWebText would not fit on an RTX 4060 system.

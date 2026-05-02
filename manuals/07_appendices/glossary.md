@@ -1,69 +1,80 @@
-# Glossary — Key Terms & Abbreviations
+# Glossary
 
-## Architecture Terms
+## Autoregressive Model
 
-| Term | Definition |
-|------|-----------|
-| **Attention** | Mechanism allowing each token to dynamically weight the importance of all other tokens in the sequence. |
-| **BPE** | Byte-Pair Encoding. Subword tokenization algorithm that iteratively merges the most frequent character/byte pairs. |
-| **Causal Mask** | A lower-triangular mask applied in attention to prevent tokens from attending to future positions. |
-| **Cross-Attention** | Attention where queries come from one sequence and keys/values from another. Used in encoder-decoder models. |
-| **Decoder-Only** | Transformer architecture that uses only the decoder stack (no encoder). Standard for GPT-style models. |
-| **Dropout** | Regularization technique that randomly zeros activations during training. |
-| **Embedding** | Dense vector representation of a discrete token. |
-| **FFN** | Feed-Forward Network. Two or three linear layers with a nonlinearity, applied per-position in Transformer blocks. |
-| **GQA** | Grouped-Query Attention. Multiple query heads share a reduced number of key-value heads. |
-| **LM Head** | Linear layer projecting hidden states to vocabulary logits for next-token prediction. |
-| **MHA** | Multi-Head Attention. Standard attention with independent Q/K/V projections per head. |
-| **MQA** | Multi-Query Attention. All query heads share a single key-value head. |
-| **Pre-LN** | Pre-normalization. Applying layer normalization before (not after) each sub-layer. |
-| **Residual Connection** | Adding the input of a sub-layer to its output: $x + f(x)$. Enables gradient flow in deep networks. |
-| **RMSNorm** | Root Mean Square Normalization. Simplified LayerNorm that omits mean-centering. |
-| **RoPE** | Rotary Positional Embedding. Encodes position by rotating Q/K vectors in 2D subspaces. |
-| **SwiGLU** | Gated Linear Unit with SiLU activation. FFN variant using three weight matrices. |
-| **Weight Tying** | Sharing the same weight matrix between token embedding and LM head. |
+A model that predicts each token from previous tokens:
 
-## Training Terms
+$$
+P(x_1,...,x_T)=\prod_t P(x_t \mid x_{<t})
+$$
 
-| Term | Definition |
-|------|-----------|
-| **AdamW** | Adam optimizer with decoupled weight decay. |
-| **bfloat16** | Brain float 16. 16-bit floating point with float32's dynamic range but reduced precision. |
-| **Checkpoint** | Saved snapshot of model weights, optimizer state, and training step. |
-| **Cosine Schedule** | Learning rate that decays following a cosine curve from peak to minimum. |
-| **Cross-Entropy** | Loss function measuring the divergence between predicted token probabilities and true labels. |
-| **Gradient Clipping** | Capping the global gradient norm to prevent training instability. |
-| **Mixed Precision** | Using lower-precision (bf16) for forward/backward and full-precision (f32) for optimizer updates. |
-| **Perplexity** | $e^{\text{cross-entropy loss}}$. Measures how "surprised" the model is by the data. Lower = better. |
-| **Warmup** | Gradually increasing the learning rate from 0 to peak over the first N steps. |
+## Base Model
 
-## Data Terms
+A model trained for next-token prediction on general text. It is not necessarily instruction-following.
 
-| Term | Definition |
-|------|-----------|
-| **memmap** | Memory-mapped file I/O. Accesses file contents as if they were in RAM without loading the full file. |
-| **Parquet** | Columnar storage format. Efficient for large tabular datasets with compression. |
-| **Token** | Atomic unit processed by the model. Can represent a word, subword, or byte sequence. |
-| **uint16** | Unsigned 16-bit integer. Stores values 0–65,535. Used for token IDs (vocab ≤ 65K). |
+## BPE
 
-## Abbreviations
+Byte Pair Encoding. A subword tokenization algorithm that repeatedly merges frequent adjacent pairs.
 
-| Abbreviation | Full Form |
-|-------------|-----------|
-| BPE | Byte-Pair Encoding |
-| CUDA | Compute Unified Device Architecture |
-| EOS | End of Sequence |
-| BOS | Beginning of Sequence |
-| FFN | Feed-Forward Network |
-| FLOP(s) | Floating-Point Operation(s) |
-| GQA | Grouped-Query Attention |
-| GPU | Graphics Processing Unit |
-| LLM | Large Language Model |
-| LM | Language Model |
-| LR | Learning Rate |
-| MHA | Multi-Head Attention |
-| MQA | Multi-Query Attention |
-| OOM | Out of Memory |
-| SGNS | Skip-Gram with Negative Sampling |
-| TFLOPS | Tera Floating-Point Operations Per Second |
-| VRAM | Video Random Access Memory |
+## Causal Mask
+
+A mask that prevents a token from attending to future positions.
+
+## Cross-Entropy
+
+The negative log probability assigned to the correct target token.
+
+## GQA
+
+Grouped-Query Attention. An attention variant where multiple query heads share fewer key-value heads.
+
+## Head Dimension
+
+The size of each attention head:
+
+$$
+d_h = d / H_q
+$$
+
+For this model:
+
+$$
+d_h = 768 / 12 = 64
+$$
+
+## Perplexity
+
+An exponentiated cross-entropy metric:
+
+$$
+\operatorname{PPL}=e^\mathcal{L}
+$$
+
+## RMSNorm
+
+Root Mean Square Layer Normalization. It normalizes by activation RMS without subtracting the mean.
+
+## RoPE
+
+Rotary Positional Embedding. A method that injects position by rotating query and key vectors.
+
+## SwiGLU
+
+A gated feed-forward activation:
+
+$$
+\operatorname{SwiGLU}(x)=W_{out}(\operatorname{SiLU}(xW_1)\odot xW_2)
+$$
+
+## Token
+
+An integer unit produced by the tokenizer. In this project, tokens come from a 32k byte-level BPE vocabulary.
+
+## Weight Tying
+
+Sharing input embedding weights with output LM-head weights:
+
+$$
+W_{lm}=E^T
+$$
+

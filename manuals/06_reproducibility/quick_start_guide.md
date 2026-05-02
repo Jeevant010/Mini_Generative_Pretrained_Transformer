@@ -1,74 +1,82 @@
-# Quick Start Guide — End-to-End in 5 Commands
+# Quick Start Guide
 
-## Prerequisites
-
-- Python 3.10+ installed
-- NVIDIA GPU with CUDA support (optional but recommended)
-- Parquet data files in a local directory
-
----
-
-## Step 1: Install Dependencies
+## 1. Install Dependencies
 
 ```powershell
 pip install --upgrade --extra-index-url https://download.pytorch.org/whl/cu124 -r requirements.txt
 ```
 
-## Step 2: Configure Dataset Path
+## 2. Configure Dataset
 
-Edit `prepare_data.py` and set your parquet directory:
+Edit `config.py`:
 
 ```python
-DATASET_PATH = r"D:\Openweb"    # ← Your path here
+DATASET_PATH = r"D:\Openweb"
+ACTIVE_PRESET = "subset_10gb"
 ```
 
-## Step 3: Prepare Data
+For a short test, use:
+
+```python
+ACTIVE_PRESET = "wizard_of_oz_smoke"
+```
+
+## 3. Prepare Data
 
 ```powershell
 python prepare_data.py
 ```
 
-This trains the BPE tokenizer (if needed) and creates `train.bin` + `val.bin`.
+Expected outputs:
 
-## Step 4: Train the Model
+```text
+train.bin
+val.bin
+bpe_tokenizer_32k.json
+```
+
+## 4. Train
 
 ```powershell
 python training.py
 ```
 
-Training auto-resumes from the latest checkpoint if one exists.
+The script auto-resumes from the latest checkpoint if one exists.
 
-## Step 5: Generate Text
+## 5. Generate Text
+
+Latest checkpoint:
 
 ```powershell
 python generate.py --prompt "The future of AI is" --max-tokens 100
 ```
 
----
+Best checkpoint:
 
-## Smoke Test (Before Long Runs)
-
-Temporarily set in `config.py`:
-
-```python
-max_iters = 300
-eval_iters = 10
-eval_interval = 100
-checkpoint_interval = 150
+```powershell
+python generate.py --checkpoint checkpoints/best_model.pt --prompt "The future of AI is" --max-tokens 100
 ```
 
-Run `python training.py`, verify checkpoints are created, run again to test resume, then test generation. Restore production values when satisfied.
+## 6. Evaluate Perplexity
 
----
+```powershell
+python -m evaluation.perplexity --checkpoint checkpoints/best_model.pt --split val --batches 50
+```
 
-## Useful Commands
+## 7. Generate Project Report
 
-| Task | Command |
-|------|---------|
-| Prepare data | `python prepare_data.py` |
-| Train | `python training.py` |
-| Generate (latest) | `python generate.py --prompt "..." --max-tokens 100` |
-| Generate (best) | `python generate.py --checkpoint checkpoints/best_model.pt --prompt "..."` |
-| Syntax check | `python -m py_compile training.py prepare_data.py dataset.py generate.py config.py tokenizer.py model.py` |
-| Project report | `python project_report.py` |
-| Profiler summary | `python profiler_quickview.py` |
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+python project_report.py
+```
+
+## Expected Current Result
+
+For the existing 60k run, the project report should show:
+
+- 117,787,392 parameters
+- 10 GB tokenized subset
+- latest checkpoint around `ckpt_step_60000.pt`
+- validation loss around 3.517
+- perplexity around 33.69 in logs
+

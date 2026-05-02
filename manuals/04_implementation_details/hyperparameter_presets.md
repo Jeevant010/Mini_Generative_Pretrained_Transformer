@@ -1,117 +1,99 @@
-# Hyperparameter Presets — RTX 4060 Safe Defaults for Every Data Scale
+# Hyperparameter Presets
 
-## 1. The Problem
-
-Choosing hyperparameters for LLM training requires understanding:
-- How much VRAM each setting consumes
-- How long training will take at a given data scale
-- Which learning rate, batch size, and warmup work for your model size
-
-This project solves that by providing **pre-computed presets** for every common scenario, all tested to be safe on an RTX 4060 (8 GB VRAM).
-
----
-
-## 2. Available Presets
-
-### Quick Reference
-
-| Preset Name | Data Size | Est. Time | Params | Use Case |
-|-------------|-----------|-----------|--------|----------|
-| `wizard_of_oz_smoke` | 237 KB | ~5 min | ~15M | Ablation testing, quick sanity check |
-| `wizard_of_oz_full` | 237 KB | ~30 min | ~40M | Deeper evaluation on small corpus |
-| `subset_1gb` | 1 GB | ~14 hrs | ~85M | First real training overnight |
-| `subset_3gb` | 3 GB | ~2 days | ~85M | Weekend baseline run |
-| `subset_10gb` | 10 GB | ~5-6 days | ~85M | Production results for paper |
-| `full_60gb` | 60 GB | ~5-6 weeks | ~85M | Full OpenWebText training |
-
-### Usage
+Presets live in `config.py` under the `PRESETS` dictionary. The active preset is:
 
 ```python
-# In config.py, set:
-ACTIVE_PRESET = "subset_10gb"  # ← Change this
+ACTIVE_PRESET = "subset_10gb"
 ```
 
-All hyperparameters are automatically applied when Python imports `config.py`.
+## Preset Summary
 
----
+| Preset | Purpose | Estimated params | Estimated time |
+| --- | --- | ---: | --- |
+| `wizard_of_oz_smoke` | Fast sanity check | ~15M | ~5 minutes |
+| `wizard_of_oz_full` | Small-corpus deeper run | ~40M | ~30 minutes |
+| `subset_1gb` | First real subset | 117.8M with current 768/12-layer architecture | ~14 hours |
+| `subset_3gb` | Weekend baseline | 117.8M with current 768/12-layer architecture | ~2 days |
+| `subset_10gb` | Current target run | 117.8M with current 768/12-layer architecture | ~5-6 days |
+| `full_60gb` | Full larger corpus | 117.8M with current 768/12-layer architecture | ~5-6 weeks |
 
-## 3. Detailed Preset Specifications
+The latest exact parameter count from `project_report.py` is 117,787,392 for the active `subset_10gb` architecture.
 
-### 3.1 `wizard_of_oz_smoke` — Quick Ablation Test
-
-```
-Data:       wizard_of_oz.txt (~43K tokens)
-Time:       ~5 minutes
-Parameters: ~15M
-VRAM:       ~1.5 GB
-```
-
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| batch_size | 8 | Small corpus → small batch is fine |
-| block_size | 128 | Short context for speed |
-| max_iters | 500 | Enough to see loss curve shape |
-| n_embd | 384 | Small model for fast iteration |
-| n_layer | 6 | Half the production depth |
-| n_head | 6 | Matches embedding dim / 64 |
-| n_kv_heads | 2 | GQA ratio maintained |
-| warmup_iters | 50 | 10% of total steps |
-| eval_interval | 50 | Frequent eval for visibility |
-
----
-
-### 3.2 `subset_10gb` — Your Target for Paper Results
-
-```
-Data:       10 GB subset (~5B tokens)
-Time:       ~5-6 days (24/7)
-Parameters: ~85M
-VRAM:       ~3.5 GB (plenty of headroom)
-```
-
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| batch_size | 20 | Maximizes throughput within VRAM |
-| block_size | 384 | Good context for coherent generation |
-| max_iters | 150,000 | ~1 epoch through 10GB |
-| n_embd | 768 | Production model dimension |
-| n_layer | 12 | Full depth |
-| n_head | 12 | Standard configuration |
-| n_kv_heads | 4 | 3:1 GQA ratio |
-| warmup_iters | 2,000 | Standard LLM warmup |
-| checkpoint_interval | 5,000 | Every ~2.5 hours |
-
----
-
-## 4. Custom Presets
-
-To add your own preset, add an entry to the `PRESETS` dict in `config.py`:
+## Active `subset_10gb`
 
 ```python
-"my_custom": {
-    "batch_size": 16,
-    "block_size": 512,
-    "max_iters": 100000,
-    "learning_rate": 2e-4,
-    "min_lr": 2e-5,
-    "warmup_iters": 1500,
-    # ... all other params ...
-    "_description": "My custom training configuration.",
-    "_est_time": "~3 days",
-    "_est_params": "~85M",
-},
+"subset_10gb": {
+    "batch_size": 20,
+    "block_size": 384,
+    "max_iters": 150000,
+    "learning_rate": 2.5e-4,
+    "min_lr": 2.5e-5,
+    "warmup_iters": 2000,
+    "eval_iters": 25,
+    "eval_interval": 2000,
+    "checkpoint_interval": 1000,
+    "n_embd": 768,
+    "n_layer": 12,
+    "n_head": 12,
+    "n_kv_heads": 4,
+    "dropout": 0.1,
+    "ffn_mult": 3.5,
+    "vocab_size": 32000,
+}
 ```
 
-Keys starting with `_` are metadata and won't be applied as hyperparameters.
+## Choosing A Preset
 
----
+Use `wizard_of_oz_smoke` when testing:
 
-## 5. Safety Rules
+- code correctness
+- checkpoint save/load
+- ablation runner behavior
+- profiler setup
+- generation script behavior
 
-> **Never exceed these on RTX 4060 (8 GB VRAM):**
-> - `batch_size × block_size > 15,000` tokens per step
-> - `n_embd > 1024` (model too large)
-> - `n_layer > 16` (too deep for 8GB)
-> - `block_size > 1024` (quadratic attention memory)
+Use `subset_10gb` when producing:
 
-If you get `CUDA out of memory`, reduce `batch_size` first, then `block_size`.
+- paper results
+- long training curves
+- checkpoint milestones
+- qualitative samples
+
+Use `full_60gb` only if:
+
+- storage is available
+- the run can continue for weeks
+- checkpoint cleanup is planned
+- thermal and power stability are acceptable
+
+## Tokens Per Step
+
+For any preset:
+
+$$
+\text{tokens per step} = \text{batch size} \times \text{block size}
+$$
+
+For `subset_10gb`:
+
+$$
+20 \times 384 = 7680
+$$
+
+## Planned Token Exposure
+
+If `subset_10gb` runs to 150,000 steps:
+
+$$
+150{,}000 \times 7680 = 1{,}152{,}000{,}000
+$$
+
+token positions will be used for optimization.
+
+Relative to the training file:
+
+$$
+\frac{1{,}152{,}000{,}000}{5{,}100{,}766{,}548} \approx 0.226
+$$
+
+So even the full 150k-step run is about 22.6 percent of one token-equivalent pass over the 10 GB training file.

@@ -1,99 +1,113 @@
-# Tokenizer Implementation — BytePairTokenizer API & Design
+# Tokenizer Implementation
 
-## 1. Class Overview
+## Class
 
-`tokenizer.py` wraps the HuggingFace `tokenizers` library (Rust backend) in a clean Python API.
+The tokenizer is implemented in:
 
-```python
-class BytePairTokenizer:
-    """Production-ready BPE tokenizer wrapper using the HuggingFace tokenizers library."""
+```text
+tokenizer.py
 ```
 
----
-
-## 2. Constructor
+Class:
 
 ```python
-def __init__(self, config=None):
-    self.tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
-    self.tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
-    self.tokenizer.decoder = decoders.ByteLevel()
-    self.special_tokens = ["<pad>", "<bos>", "<eos>", "<unk>"]
-    self.special_to_id = {}
+BytePairTokenizer
 ```
 
-- **BPE model**: Initialized with `<unk>` as the unknown token.
-- **ByteLevel pre-tokenizer**: Converts bytes to alphabet characters before BPE.
-- **ByteLevel decoder**: Reverses the byte-level encoding during decoding.
+It wraps HuggingFace `tokenizers`, which uses a fast Rust backend.
 
----
-
-## 3. Training
+## Construction
 
 ```python
-def train(self, files_or_iterator, vocab_size=32000, verbose=True):
-    trainer = trainers.BpeTrainer(
-        vocab_size=vocab_size,
-        special_tokens=self.special_tokens,
-        min_frequency=2,
-        show_progress=verbose
-    )
-    self.tokenizer.train_from_iterator(files_or_iterator, trainer)
-    self._sync_special_ids()
+self.tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
+self.tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+self.tokenizer.decoder = decoders.ByteLevel()
 ```
 
-Accepts a single string, list of strings, or any iterator. The Rust backend handles the heavy computation.
+Special tokens:
 
----
+```text
+<pad>, <bos>, <eos>, <unk>
+```
 
-## 4. Encoding
+## Training
+
+The training method uses:
 
 ```python
-def encode(self, text, add_bos=False, add_eos=False) -> List[int]:
-    output = self.tokenizer.encode(text)
-    ids = output.ids
-    if add_bos: ids = [self.special_to_id["<bos>"]] + ids
-    if add_eos: ids = ids + [self.special_to_id["<eos>"]]
-    return ids
+train_from_iterator(files_or_iterator, trainer)
 ```
 
----
-
-## 5. Decoding
+with:
 
 ```python
-def decode(self, token_ids, skip_special_tokens=False) -> str:
-    return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
+trainers.BpeTrainer(
+    vocab_size=32000,
+    special_tokens=self.special_tokens,
+    min_frequency=2
+)
 ```
 
----
+The preprocessing script trains from a 200 MB text sample if the tokenizer file does not already exist.
 
-## 6. Persistence
+## Encoding
+
+Single text:
 
 ```python
-def save(self, path):
-    self.tokenizer.save(str(path))
-
-@classmethod
-def load(cls, path) -> "BytePairTokenizer":
-    instance = cls()
-    instance.tokenizer = Tokenizer.from_file(str(path))
-    instance._sync_special_ids()
-    return instance
+ids = tokenizer.encode(text, add_bos=False, add_eos=False)
 ```
 
-Serializes to JSON via the HuggingFace library. Fully portable and human-inspectable.
-
----
-
-## 7. Special Token Management
+Batch:
 
 ```python
-def _sync_special_ids(self):
-    vocab = self.tokenizer.get_vocab()
-    for tok in self.special_tokens:
-        if tok in vocab:
-            self.special_to_id[tok] = vocab[tok]
+ids_batch = tokenizer.encode_batch(texts)
 ```
 
-This synchronizes the `special_to_id` mapping after training or loading, enabling `encode(add_bos=True)` and `EOS_ID` lookup in the data pipeline.
+Optional BOS/EOS insertion is handled manually after the backend encode call.
+
+## Decoding
+
+```python
+text = tokenizer.decode(token_ids, skip_special_tokens=False)
+```
+
+Generation uses `skip_special_tokens=True` so BOS/EOS/PAD tokens do not appear in the printed output.
+
+## Special ID Sync
+
+After training or loading, `_sync_special_ids()` builds:
+
+```python
+self.special_to_id
+```
+
+This map is needed for:
+
+- adding BOS during generation
+- adding EOS during data preparation
+
+## Saved Artifact
+
+The tokenizer is saved to:
+
+```text
+bpe_tokenizer_32k.json
+```
+
+Current size:
+
+```text
+2.16 MB
+```
+
+## Relationship To Binary Data
+
+The tokenizer defines the mapping:
+
+$$
+\text{text} \leftrightarrow \text{token IDs}
+$$
+
+The binary files store only token IDs. Therefore, `train.bin` and `val.bin` are meaningful only with the exact tokenizer JSON used to create them.
+

@@ -1,218 +1,200 @@
-# Attention Mechanisms — Theoretical Deep-Dive
+# Attention Mechanisms
 
-## 1. Overview
+## Why Attention Is Needed
 
-Attention is the core mechanism that allows Transformer models to dynamically weight the importance of different tokens in a sequence. This project implements and explores **five** attention variants across the research notebooks and production code.
+Self-attention lets each token build a context-aware representation by looking back at earlier tokens. For language modeling, token `t` may use positions `1...t`, but not future positions.
 
-This document provides mathematical formulations, computational complexity analysis, memory trade-offs, and practical guidance for each variant.
+The causal constraint is what turns a Transformer block into a decoder-only language model.
 
----
+## Query, Key, Value
 
-## 2. Scaled Dot-Product Attention (Foundation)
+For an input activation matrix:
 
-All attention variants in this project build on the same fundamental operation:
+$$
+X \in \mathbb{R}^{B \times T \times d}
+$$
 
-$$\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q} \mathbf{K}^\top}{\sqrt{d_k}}\right) \mathbf{V}$$
+the model computes:
 
-where:
-- $\mathbf{Q} \in \mathbb{R}^{T_q \times d_k}$ — Query matrix
-- $\mathbf{K} \in \mathbb{R}^{T_k \times d_k}$ — Key matrix  
-- $\mathbf{V} \in \mathbb{R}^{T_k \times d_v}$ — Value matrix
-- $d_k$ — Key/query dimension (used for scaling)
-- $T_q, T_k$ — Query and key sequence lengths
+$$
+Q = XW_Q
+$$
 
-### 2.1 Why Scale by $\sqrt{d_k}$?
+$$
+K = XW_K
+$$
 
-Without scaling, the dot products $\mathbf{Q}\mathbf{K}^\top$ grow in magnitude proportionally to $d_k$, pushing the softmax into regions with extremely small gradients. Dividing by $\sqrt{d_k}$ keeps the variance of the dot products approximately 1, ensuring healthy gradient flow.
+$$
+V = XW_V
+$$
 
----
+For this project:
 
-## 3. Type 1: Multi-Head Self-Attention (MHA)
+$$
+d = 768,\quad H_q = 12,\quad H_{kv}=4,\quad d_h=64
+$$
 
-### 3.1 Formulation
+Queries have shape:
 
-Multi-Head Attention (Vaswani et al., 2017) projects the input into $h$ parallel "heads", each computing attention independently:
+$$
+Q \in \mathbb{R}^{B \times H_q \times T \times d_h}
+$$
 
-$$\text{head}_i = \text{Attention}(\mathbf{X}\mathbf{W}_i^Q, \mathbf{X}\mathbf{W}_i^K, \mathbf{X}\mathbf{W}_i^V)$$
+Keys and values have shape:
 
-$$\text{MHA}(\mathbf{X}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h) \mathbf{W}^O$$
+$$
+K,V \in \mathbb{R}^{B \times H_{kv} \times T \times d_h}
+$$
 
-where:
-- $\mathbf{W}_i^Q, \mathbf{W}_i^K, \mathbf{W}_i^V \in \mathbb{R}^{d \times d_k}$
-- $\mathbf{W}^O \in \mathbb{R}^{d \times d}$
-- $d_k = d / h$ (head dimension)
+## Scaled Dot-Product Attention
 
-### 3.2 Properties
+The raw attention score between query position `i` and key position `j` is:
 
-- Each head can learn different relational patterns (e.g., syntactic, semantic, positional).
-- Bidirectional: every token attends to every other token.
-- Suitable for encoder-style tasks (BERT, classification).
+$$
+s_{ij} = \frac{q_i \cdot k_j}{\sqrt{d_h}}
+$$
 
-### 3.3 Complexity
+The scale factor prevents score variance from growing with head dimension.
 
-| Metric | Value |
-|--------|-------|
-| Time complexity | $O(T^2 \cdot d)$ |
-| KV memory per head | $O(T \cdot d_k)$ |
-| Total KV memory | $O(h \cdot T \cdot d_k) = O(T \cdot d)$ |
-| Parameters | $4 \cdot d^2$ (Q, K, V, O projections) |
+After applying the causal mask:
 
----
+$$
+M_{ij} =
+\begin{cases}
+0, & j \leq i \\
+-\infty, & j > i
+\end{cases}
+$$
 
-## 4. Type 2: Masked Causal Self-Attention
+the normalized attention weight is:
 
-### 4.1 Formulation
+$$
+a_{ij} = \frac{\exp(s_{ij}+M_{ij})}{\sum_{r=1}^{T}\exp(s_{ir}+M_{ir})}
+$$
 
-Identical to MHA, but with a **causal mask** $\mathbf{M}$ that prevents token $t$ from attending to any token $t' > t$:
+The output is:
 
-$$\mathbf{M}_{ij} = \begin{cases} 0 & \text{if } i \geq j \\ -\infty & \text{if } i < j \end{cases}$$
+$$
+o_i = \sum_{j=1}^{T} a_{ij}v_j
+$$
 
-$$\text{CausalAttention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}} + \mathbf{M}\right) \mathbf{V}$$
+## Rotary Positional Embeddings
 
-### 4.2 Why This Is Required
+Self-attention alone has no built-in token order. RoPE injects position into the query and key vectors.
 
-In autoregressive language modeling, the training objective is to predict token $t$ from tokens $1, \ldots, t-1$. If the model could see token $t$ (or future tokens) during training, it would trivially copy the answer instead of learning to predict.
+For each pair of dimensions, RoPE applies a rotation:
 
-Causal masking enforces the constraint that information flows only from past to present, making training consistent with the generation procedure.
+$$
+\begin{bmatrix}
+a' \\
+b'
+\end{bmatrix}
+=
+\begin{bmatrix}
+\cos(m\theta_i) & -\sin(m\theta_i) \\
+\sin(m\theta_i) & \cos(m\theta_i)
+\end{bmatrix}
+\begin{bmatrix}
+a \\
+b
+\end{bmatrix}
+$$
 
-### 4.3 Implementation
+where `m` is the token position and:
 
-PyTorch's `F.scaled_dot_product_attention(q, k, v, is_causal=True)` automatically applies an efficient causal mask using FlashAttention-compatible fused kernels when available.
+$$
+\theta_i = 10000^{-2i/d_h}
+$$
 
----
+The implementation computes:
 
-## 5. Type 3: Multi-Query Attention (MQA)
+$$
+\operatorname{RoPE}(x) = x \odot \cos(\Theta) + \operatorname{rotate\_half}(x)\odot \sin(\Theta)
+$$
 
-### 5.1 Formulation (Shazeer, 2019)
+RoPE is applied to `Q` and `K`, not `V`.
 
-MQA reduces the number of key and value heads to **one**, while keeping multiple query heads:
+## Grouped-Query Attention
 
-$$\text{head}_i = \text{Attention}(\mathbf{X}\mathbf{W}_i^Q, \mathbf{X}\mathbf{W}^K, \mathbf{X}\mathbf{W}^V)$$
+Full Multi-Head Attention uses:
 
-All $h$ query heads share a **single** key projection $\mathbf{W}^K$ and a **single** value projection $\mathbf{W}^V$.
+$$
+H_q = H_k = H_v
+$$
 
-### 5.2 Advantages
+Grouped-Query Attention uses fewer key-value heads:
 
-- **KV cache reduction**: During autoregressive generation, only 1 KV pair is stored per layer instead of $h$, reducing memory by $h\times$.
-- **Faster inference**: Fewer memory reads for KV during generation.
-- **Acceptable quality**: MQA quality is close to MHA for many tasks, especially when the model is large.
+$$
+H_{kv} < H_q
+$$
 
-### 5.3 Disadvantages
+In this project:
 
-- Some quality degradation compared to full MHA, especially for smaller models.
-- The single KV head becomes a bottleneck for learning diverse relational patterns.
+$$
+H_q = 12,\quad H_{kv} = 4
+$$
 
-### 5.4 Complexity
+Each key-value head is shared by:
 
-| Metric | MHA | MQA |
-|--------|-----|-----|
-| KV parameters | $2 \cdot d^2$ | $2 \cdot d \cdot d_k$ |
-| KV cache (generation) | $O(h \cdot T \cdot d_k)$ | $O(T \cdot d_k)$ |
-| Reduction factor | — | $h\times$ less KV memory |
+$$
+g = \frac{H_q}{H_{kv}} = 3
+$$
 
----
+query heads.
 
-## 6. Type 4: Grouped-Query Attention (GQA) — **Used in Production**
-
-### 6.1 Formulation (Ainslie et al., 2023)
-
-GQA is a generalization that sits between MHA and MQA. Query heads are divided into $g$ groups, where each group of $h/g$ query heads shares one key-value head:
-
-$$\text{head}_i = \text{Attention}(\mathbf{X}\mathbf{W}_i^Q, \mathbf{X}\mathbf{W}_{g(i)}^K, \mathbf{X}\mathbf{W}_{g(i)}^V)$$
-
-where $g(i) = \lfloor i \cdot n_{kv} / h \rfloor$ maps query head $i$ to its KV group.
-
-### 6.2 This Project's Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| Query heads ($h$) | 12 |
-| KV heads ($n_{kv}$) | 4 |
-| Heads per KV group | 3 |
-| Head dimension | 64 |
-
-This means every 3 query heads share 1 key-value head.
-
-### 6.3 Implementation Detail
-
-The KV heads are expanded to match the query head count via `repeat_interleave`:
+In code, keys and values are repeated across query groups:
 
 ```python
-if self.n_kv_heads != self.n_heads:
-    k = k.repeat_interleave(self.n_heads // self.n_kv_heads, dim=1)
-    v = v.repeat_interleave(self.n_heads // self.n_kv_heads, dim=1)
+k = k.repeat_interleave(self.n_heads // self.n_kv_heads, dim=1)
+v = v.repeat_interleave(self.n_heads // self.n_kv_heads, dim=1)
 ```
 
-### 6.4 Trade-off Spectrum
+## Parameter Saving From GQA
 
+With full MHA, key and value projections each output `d` features:
+
+$$
+2d^2 = 2(768)(768) = 1{,}179{,}648
+$$
+
+With GQA, key and value projections output:
+
+$$
+H_{kv}d_h = 4 \times 64 = 256
+$$
+
+features each:
+
+$$
+2d(H_{kv}d_h) = 2(768)(256) = 393{,}216
+$$
+
+GQA saves:
+
+$$
+1{,}179{,}648 - 393{,}216 = 786{,}432
+$$
+
+key-value projection parameters per layer compared with full MHA.
+
+## Flash Attention Path
+
+When `USE_FLASH_ATTENTION = True`, attention is executed by:
+
+```python
+F.scaled_dot_product_attention(q, k, v, is_causal=True)
 ```
-Full MHA ←————————— GQA ——————————→ MQA
-h KV heads        g KV heads        1 KV head
-Max quality       Balanced           Max efficiency
-Max KV memory     Moderate           Min KV memory
-```
 
-### 6.5 Why GQA Was Chosen
+PyTorch can dispatch this to optimized kernels. The mathematical result is equivalent to standard causal attention, but the memory behavior is better because the full attention matrix does not need to be materialized in the same way as the manual path.
 
-- Best quality-to-efficiency ratio for RTX 4060-class hardware.
-- 3× KV memory reduction vs. MHA (4 KV heads vs. 12).
-- Negligible quality loss compared to full MHA at this model scale.
-- Used in LLaMA 2 (70B), Mistral 7B, and Gemma.
+## Manual Attention Path
 
----
+When `USE_FLASH_ATTENTION = False`, the project uses `manual_causal_attention()`:
 
-## 7. Bonus: Cross-Attention
+1. Compute `Q @ K.T`
+2. Apply causal mask
+3. Apply softmax
+4. Multiply by `V`
 
-### 7.1 Formulation
+This is useful for ablation because it isolates Flash Attention as a hardware efficiency feature rather than a modeling feature.
 
-Cross-attention allows one sequence to attend to another:
-
-$$\text{CrossAttention}(\mathbf{X}_{decoder}, \mathbf{X}_{encoder}) = \text{Attention}(\mathbf{X}_{decoder}\mathbf{W}^Q, \mathbf{X}_{encoder}\mathbf{W}^K, \mathbf{X}_{encoder}\mathbf{W}^V)$$
-
-Queries come from the decoder, while keys and values come from the encoder.
-
-### 7.2 Use Cases
-
-- Encoder-decoder models (T5, BART).
-- Image-conditioned text generation.
-- Retrieval-augmented generation.
-
-### 7.3 Status in This Project
-
-Cross-attention is implemented in the research notebooks for completeness but is **not used** in the production decoder-only pipeline.
-
----
-
-## 8. Comparative Summary
-
-| Variant | KV Heads | KV Params | KV Cache | Quality | Used In |
-|---------|----------|-----------|----------|---------|---------|
-| MHA | $h$ | $2d^2$ | $O(hTd_k)$ | Highest | GPT-2, BERT |
-| Causal MHA | $h$ | $2d^2$ | $O(hTd_k)$ | Highest | GPT-2 |
-| MQA | 1 | $2dd_k$ | $O(Td_k)$ | Good | PaLM |
-| GQA | $g$ | $2gdd_k$ | $O(gTd_k)$ | Very Good | LLaMA 2, **This project** |
-| Cross-Attn | $h$ | $2d^2$ | N/A | N/A | T5 |
-
----
-
-## 9. FlashAttention and Fused Kernels
-
-This project leverages PyTorch's `F.scaled_dot_product_attention`, which automatically dispatches to the most efficient kernel available:
-
-1. **FlashAttention-2** (Dao, 2023): Tiled, memory-efficient attention that avoids materializing the full $T \times T$ attention matrix.
-2. **Math fallback**: Standard computation when FlashAttention is unavailable.
-
-Benefits of FlashAttention:
-- Memory: $O(T)$ instead of $O(T^2)$ for the attention matrix.
-- Speed: 2–4× faster for long sequences.
-- Automatically used when `is_causal=True` is set.
-
----
-
-## 10. References
-
-1. Vaswani, A., et al. (2017). "Attention Is All You Need." *NeurIPS*.
-2. Shazeer, N. (2019). "Fast Transformer Decoding: One Write-Head is All You Need." *arXiv:1911.02150*.
-3. Ainslie, J., et al. (2023). "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints." *arXiv:2305.13245*.
-4. Dao, T. (2023). "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning." *arXiv:2307.08691*.
-5. Touvron, H., et al. (2023). "LLaMA 2: Open Foundation and Fine-Tuned Chat Models." *arXiv:2307.09288*.

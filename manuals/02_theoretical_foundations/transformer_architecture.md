@@ -1,238 +1,208 @@
-# Transformer Architecture — Theoretical Foundations
+# Transformer Architecture
 
-## 1. Introduction
+## Decoder-Only Transformer
 
-The Transformer architecture, introduced by Vaswani et al. (2017) in *"Attention Is All You Need"*, replaced recurrence-based sequence models with a fully attention-driven design. This project implements a **decoder-only** variant of the Transformer, which is the foundation of the GPT family of models (Radford et al., 2018, 2019; Brown et al., 2020).
+The project implements a decoder-only Transformer. Given a token sequence:
 
-This document describes the theoretical underpinnings of every architectural component used in this project's `model.py`, with mathematical formulations and design rationale.
+$$
+x_1, x_2, ..., x_T
+$$
 
----
+the model estimates:
 
-## 2. Decoder-Only Architecture
+$$
+P(x_1, ..., x_T) = \prod_{t=1}^{T} P(x_t \mid x_{<t})
+$$
 
-### 2.1 Why Decoder-Only?
+This is the standard autoregressive language-modeling objective. During training, the input sequence is shifted by one position to form targets:
 
-Encoder-decoder Transformers (e.g., T5, BART) are designed for sequence-to-sequence tasks. Decoder-only models are optimized for **autoregressive language modeling**: predicting the next token given all previous tokens.
+$$
+x = [x_1, ..., x_T]
+$$
 
-Advantages of decoder-only for this project:
+$$
+y = [x_2, ..., x_{T+1}]
+$$
 
-- Simpler architecture (no encoder, no cross-attention during training).
-- Directly supports text generation via left-to-right sampling.
-- Demonstrated to scale efficiently (GPT-3, LLaMA, Mistral).
+The model predicts every target token from all previous visible input tokens.
 
-### 2.2 High-Level Data Flow
+## Shape Notation
 
-```
-Input Token IDs → Token Embedding → [Transformer Block × N] → Final Norm → LM Head → Logits
-```
+| Symbol | Meaning | Current value |
+| --- | --- | ---: |
+| `B` | Batch size | 20 |
+| `T` | Context length | 384 |
+| `V` | Vocabulary size | 32,000 |
+| `d` | Embedding width | 768 |
+| `L` | Number of blocks | 12 |
+| `H_q` | Query heads | 12 |
+| `H_kv` | Key-value heads | 4 |
+| `d_h` | Head dimension | 64 |
 
-Each Transformer Block contains:
+The token batch has shape:
 
-```
-x → RMSNorm → GQA Attention → Residual Add → RMSNorm → SwiGLU FFN → Residual Add → output
-```
+$$
+X \in \mathbb{N}^{B \times T}
+$$
 
-This is a **pre-normalization** (Pre-LN) design, where normalization is applied before each sub-layer rather than after. Pre-LN has been shown to stabilize training in deep networks (Xiong et al., 2020).
+The embedding output has shape:
 
----
+$$
+H^{(0)} \in \mathbb{R}^{B \times T \times d}
+$$
 
-## 3. Token Embedding and Weight Tying
+## Token Embedding
 
-### 3.1 Token Embedding
+Each token ID maps to a trainable vector:
 
-Each token ID $t \in \{0, 1, \ldots, V-1\}$ is mapped to a dense vector $\mathbf{e}_t \in \mathbb{R}^{d}$ via a learned embedding matrix:
+$$
+h_t^{(0)} = E[x_t]
+$$
 
-$$\mathbf{E} \in \mathbb{R}^{V \times d}$$
+where:
 
-where $V = 32{,}000$ is the vocabulary size and $d = 768$ is the embedding dimension.
+$$
+E \in \mathbb{R}^{V \times d}
+$$
 
-### 3.2 Weight Tying
+For this model:
 
-The output projection (LM head) shares the same weight matrix as the token embedding:
+$$
+Vd = 32000 \times 768 = 24{,}576{,}000
+$$
 
-$$\mathbf{W}_{LM} = \mathbf{E}$$
+embedding parameters.
 
-This technique, proposed by Press & Wolf (2017), reduces parameter count by $V \times d$ parameters and has been shown to improve language modeling performance by coupling input and output representations.
+## Transformer Block
 
-In code: `self.token_embed.weight = self.lm_head.weight`
+Each block uses pre-normalization residual structure:
 
----
+$$
+u^{(l)} = h^{(l)} + \operatorname{Attn}(\operatorname{RMSNorm}(h^{(l)}))
+$$
 
-## 4. RMSNorm (Root Mean Square Layer Normalization)
+$$
+h^{(l+1)} = u^{(l)} + \operatorname{SwiGLU}(\operatorname{RMSNorm}(u^{(l)}))
+$$
 
-### 4.1 Motivation
+Pre-normalization makes training more stable because the residual stream remains a direct path through the network.
 
-Standard Layer Normalization (Ba et al., 2016) computes both mean and variance. RMSNorm (Zhang & Sennrich, 2019) simplifies this by removing the mean-centering step, retaining only the root-mean-square normalization:
+## RMSNorm
 
-$$\text{RMSNorm}(\mathbf{x}) = \frac{\mathbf{x}}{\sqrt{\frac{1}{d} \sum_{i=1}^{d} x_i^2 + \epsilon}} \odot \boldsymbol{\gamma}$$
+RMSNorm normalizes by root mean square:
 
-where $\boldsymbol{\gamma} \in \mathbb{R}^d$ is a learned scale parameter and $\epsilon = 10^{-6}$ prevents division by zero.
+$$
+\operatorname{RMS}(x) = \sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2 + \epsilon}
+$$
 
-### 4.2 Advantages
+$$
+\operatorname{RMSNorm}(x)_i = g_i\frac{x_i}{\operatorname{RMS}(x)}
+$$
 
-- **Faster**: Eliminates the mean computation and subtraction.
-- **Stable**: Sufficient for preventing gradient explosion in deep networks.
-- **Standard in modern LLMs**: Used in LLaMA, Mistral, and Gemma.
+where `g` is a learned scale vector. The implementation uses `eps = 1e-6`.
 
----
+RMSNorm avoids mean subtraction, making it cheaper than LayerNorm:
 
-## 5. Rotary Positional Embeddings (RoPE)
+$$
+\operatorname{LayerNorm}(x)_i =
+\gamma_i \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta_i
+$$
 
-### 5.1 The Position Encoding Problem
+## Attention
 
-Transformers are permutation-invariant by default — without positional information, the model cannot distinguish token order. Three main approaches exist:
+The model uses causal scaled dot-product attention:
 
-| Method | Type | Length Extrapolation |
-|--------|------|---------------------|
-| Learned Absolute | Additive | Poor |
-| Sinusoidal (Vaswani) | Fixed, Additive | Moderate |
-| RoPE (Su et al., 2021) | Rotary, Multiplicative | Good |
+$$
+S = \frac{QK^T}{\sqrt{d_h}}
+$$
 
-### 5.2 RoPE Formulation
+The causal mask is:
 
-RoPE encodes position by **rotating** query and key vectors in 2D subspaces. For position $m$ and dimension pair $(2i, 2i+1)$:
+$$
+M_{ij} =
+\begin{cases}
+0, & j \leq i \\
+-\infty, & j > i
+\end{cases}
+$$
 
-$$\begin{pmatrix} q_{2i}^{(m)} \\ q_{2i+1}^{(m)} \end{pmatrix} = \begin{pmatrix} \cos(m\theta_i) & -\sin(m\theta_i) \\ \sin(m\theta_i) & \cos(m\theta_i) \end{pmatrix} \begin{pmatrix} q_{2i} \\ q_{2i+1} \end{pmatrix}$$
+The attention weights are:
 
-where $\theta_i = 10000^{-2i/d_h}$ and $d_h$ is the head dimension.
+$$
+A = \operatorname{softmax}(S + M)
+$$
 
-### 5.3 Key Properties
+The attention output is:
 
-1. **Relative position encoding**: The dot product $\langle \mathbf{q}_m, \mathbf{k}_n \rangle$ depends only on the relative position $m - n$.
-2. **No additional parameters**: RoPE is computed, not learned.
-3. **Length generalization**: Better extrapolation to unseen sequence lengths than learned absolute embeddings.
+$$
+O = AV
+$$
 
-### 5.4 Implementation
+The current implementation uses PyTorch `F.scaled_dot_product_attention(..., is_causal=True)` when `USE_FLASH_ATTENTION = True`.
 
-In this project, RoPE is applied to **both queries and keys** after linear projection but before the attention computation:
+## Feed-Forward Layer
 
-```python
-cos, sin = self.rope(seq_len, device, dtype)
-q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
-```
+The feed-forward network uses SwiGLU:
 
-The `rotate_half` function implements the rotation by splitting the last dimension and negating half:
+$$
+\operatorname{SwiGLU}(x) =
+W_{out}(\operatorname{SiLU}(xW_1) \odot xW_2)
+$$
 
-$$\text{rotate\_half}(\mathbf{x}) = [-x_{d/2+1}, \ldots, -x_d, x_1, \ldots, x_{d/2}]$$
+where:
 
----
+$$
+\operatorname{SiLU}(z) = z\sigma(z)
+$$
 
-## 6. SwiGLU Feed-Forward Network
+and:
 
-### 6.1 Standard FFN vs. SwiGLU
+$$
+\sigma(z) = \frac{1}{1+e^{-z}}
+$$
 
-The original Transformer uses a two-layer FFN with ReLU:
+The hidden dimension is:
 
-$$\text{FFN}(\mathbf{x}) = \text{ReLU}(\mathbf{x} \mathbf{W}_1 + \mathbf{b}_1) \mathbf{W}_2 + \mathbf{b}_2$$
+$$
+d_{ff} = \lfloor 3.5d \rfloor = 2688
+$$
 
-SwiGLU (Shazeer, 2020) replaces this with a gated structure using the SiLU (Swish) activation:
+## Final Projection
 
-$$\text{SwiGLU}(\mathbf{x}) = (\text{SiLU}(\mathbf{x} \mathbf{W}_1) \odot \mathbf{x} \mathbf{W}_2) \mathbf{W}_{out}$$
+After all blocks, the model applies final RMSNorm:
 
-where $\text{SiLU}(z) = z \cdot \sigma(z)$ and $\odot$ denotes element-wise multiplication.
+$$
+z = \operatorname{RMSNorm}(h^{(L)})
+$$
 
-### 6.2 Architecture Details
+and computes logits:
 
-| Component | Shape |
-|-----------|-------|
-| $\mathbf{W}_1$ (gate) | $d \times h$ |
-| $\mathbf{W}_2$ (up projection) | $d \times h$ |
-| $\mathbf{W}_{out}$ (down projection) | $h \times d$ |
+$$
+\ell = zW_{lm}
+$$
 
-Hidden dimension: $h = \lfloor 3.5 \times d \rfloor = \lfloor 3.5 \times 768 \rfloor = 2688$
+where:
 
-Note: SwiGLU uses **three** weight matrices instead of two, but the hidden dimension is typically reduced by a factor of $\frac{2}{3}$ relative to a standard FFN to keep total parameter count comparable. The `ffn_mult = 3.5` in this project accounts for this adjustment.
+$$
+W_{lm} \in \mathbb{R}^{d \times V}
+$$
 
-### 6.3 Why SwiGLU?
+The model ties:
 
-- Consistently outperforms ReLU and GELU FFNs at equivalent parameter budgets (Shazeer, 2020).
-- Used in LLaMA, PaLM, Mistral, and most modern LLMs.
-- The gating mechanism provides a learnable information filter within each layer.
+$$
+W_{lm} = E^T
+$$
 
----
+so the token embedding and output classifier share the same parameters.
 
-## 7. Pre-Normalization Residual Connections
+## Parameter Summary
 
-The Transformer Block uses the **Pre-LN** residual pattern:
+| Component | Parameters |
+| --- | ---: |
+| Token embedding and tied LM head | 24,576,000 |
+| All Transformer blocks | 93,210,624 |
+| Final RMSNorm | 768 |
+| Total | 117,787,392 |
 
-$$\mathbf{x} = \mathbf{x} + \text{Attention}(\text{RMSNorm}(\mathbf{x}))$$
-$$\mathbf{x} = \mathbf{x} + \text{SwiGLU}(\text{RMSNorm}(\mathbf{x}))$$
+The model is therefore a 117.8M parameter decoder-only GPT-style language model.
 
-This differs from the original Post-LN design where normalization comes after the residual addition. Pre-LN:
-
-- Prevents gradient magnitude issues in early layers.
-- Allows stable training without careful learning rate warm-up (though warm-up is still beneficial).
-- Is the standard in all recent large language models.
-
----
-
-## 8. Autoregressive Training Objective
-
-The model is trained with the standard **next-token prediction** objective (causal language modeling):
-
-$$\mathcal{L} = -\frac{1}{T} \sum_{t=1}^{T} \log P(x_t \mid x_1, x_2, \ldots, x_{t-1}; \theta)$$
-
-where $T$ is the sequence length and $\theta$ are the model parameters.
-
-This is implemented as cross-entropy loss between the model's logit predictions and the target token IDs:
-
-```python
-loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
-```
-
-### 8.1 Causal Masking
-
-To prevent the model from attending to future tokens during training, a causal mask is applied within the attention computation. PyTorch's `F.scaled_dot_product_attention` with `is_causal=True` handles this efficiently using FlashAttention-compatible kernels.
-
----
-
-## 9. Mixed-Precision Training
-
-The training pipeline uses **bfloat16** mixed-precision via `torch.autocast`:
-
-```python
-with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-    logits, loss = model(xb, yb)
-```
-
-### 9.1 Why bfloat16?
-
-| Property | float16 | bfloat16 |
-|----------|---------|----------|
-| Mantissa bits | 10 | 7 |
-| Exponent bits | 5 | 8 |
-| Dynamic range | Lower | Same as float32 |
-| Precision | Higher | Lower |
-
-bfloat16 matches float32's dynamic range, making it more numerically stable for training without requiring a loss scaler. This is the standard precision for modern GPU training.
-
----
-
-## 10. Summary of Architectural Choices vs. Original Transformer
-
-| Component | Original Transformer (2017) | This Project |
-|-----------|-----------------------------|-------------|
-| Architecture | Encoder-Decoder | Decoder-Only |
-| Normalization | Post-LN LayerNorm | Pre-LN RMSNorm |
-| Position Encoding | Sinusoidal (additive) | RoPE (rotary) |
-| Attention | Multi-Head (full KV) | Grouped-Query (4 KV heads) |
-| FFN | ReLU, 2 matrices | SwiGLU, 3 matrices |
-| Bias terms | Yes | No (bias=False) |
-| Weight tying | Optional | Yes (embed ↔ LM head) |
-| Precision | float32 | bfloat16 mixed |
-
----
-
-## 11. References
-
-1. Vaswani, A., et al. (2017). "Attention Is All You Need." *NeurIPS*.
-2. Radford, A., et al. (2018). "Improving Language Understanding by Generative Pre-Training." *OpenAI*.
-3. Radford, A., et al. (2019). "Language Models are Unsupervised Multitask Learners." *OpenAI*.
-4. Brown, T., et al. (2020). "Language Models are Few-Shot Learners." *NeurIPS*.
-5. Su, J., et al. (2021). "RoFormer: Enhanced Transformer with Rotary Position Embedding." *arXiv:2104.09864*.
-6. Zhang, B. & Sennrich, R. (2019). "Root Mean Square Layer Normalization." *NeurIPS*.
-7. Shazeer, N. (2020). "GLU Variants Improve Transformer." *arXiv:2002.05202*.
-8. Press, O. & Wolf, L. (2017). "Using the Output Embedding to Improve Language Models." *EACL*.
-9. Xiong, R., et al. (2020). "On Layer Normalization in the Transformer Architecture." *ICML*.
-10. Touvron, H., et al. (2023). "LLaMA: Open and Efficient Foundation Language Models." *arXiv:2302.13971*.
-11. Ainslie, J., et al. (2023). "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints." *arXiv:2305.13245*.

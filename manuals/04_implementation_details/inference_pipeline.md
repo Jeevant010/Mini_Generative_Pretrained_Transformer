@@ -1,126 +1,121 @@
-# Inference Pipeline — Generation, Sampling Strategies & Checkpoint Loading
+# Inference Pipeline
 
-## 1. Overview
+## Entry Point
 
-`generate.py` provides text generation from trained model checkpoints via CLI.
+Use:
 
-```bash
+```powershell
 python generate.py --prompt "The future of AI is" --max-tokens 100
-python generate.py --checkpoint checkpoints/best_model.pt --prompt "Once upon a time" --max-tokens 200
 ```
 
----
+To use a specific checkpoint:
 
-## 2. Inference Pipeline Steps
-
-1. **Device setup**: Auto-detect CUDA/CPU from `config.device`.
-2. **Load tokenizer**: `BytePairTokenizer.load(config.TOKENIZER_PATH)`.
-3. **Load checkpoint**: Latest `ckpt_step_*.pt` or user-specified path.
-4. **Initialize model**: `GPTLanguageModel(config).to(device)`, load state dict.
-5. **Encode prompt**: `tokenizer.encode(prompt, add_bos=True)` → tensor.
-6. **Generate**: Autoregressive token-by-token generation.
-7. **Decode**: `tokenizer.decode(output_ids, skip_special_tokens=True)` → text.
-
----
-
-## 3. Autoregressive Generation Algorithm
-
-```python
-@torch.no_grad()
-def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
-    self.eval()
-    for _ in range(max_new_tokens):
-        # Crop to context window
-        idx_cond = idx[:, -self.cfg.block_size:]
-        # Forward pass
-        logits, _ = self(idx_cond)
-        # Take last position's logits
-        logits = logits[:, -1, :] / temperature
-        # Top-k filtering
-        if top_k is not None:
-            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < v[:, [-1]]] = -float('Inf')
-        # Sample
-        probs = F.softmax(logits, dim=-1)
-        idx_next = torch.multinomial(probs, num_samples=1)
-        idx = torch.cat((idx, idx_next), dim=1)
-    return idx
+```powershell
+python generate.py --checkpoint checkpoints/best_model.pt --prompt "The future of AI is" --max-tokens 100
 ```
 
----
+## Loading Steps
 
-## 4. Sampling Parameters
+`generate.py` performs:
 
-### 4.1 Temperature
+1. Select device from `config.device`.
+2. Load `bpe_tokenizer_32k.json`.
+3. Find latest `ckpt_step_*.pt` if no checkpoint is specified.
+4. Construct `GPTLanguageModel(config)`.
+5. Load checkpoint state dict.
+6. Encode prompt with BOS.
+7. Generate tokens autoregressively.
+8. Decode token IDs to text.
 
-Controls randomness of predictions:
+## Autoregressive Generation
 
-| Temperature | Effect |
-|-------------|--------|
-| 0.0–0.5 | Very deterministic, repetitive |
-| 0.7–0.9 | Good balance of coherence and diversity |
-| 1.0 | Standard (unmodified distribution) |
-| 1.5+ | Very random, potentially incoherent |
+At each generation step:
 
-Formula: `logits = logits / temperature`
+$$
+x_{1:t} \rightarrow \operatorname{model}(x_{1:t})
+$$
 
-Default in project: **0.8**
+Only the last-position logits are used:
 
-### 4.2 Top-k Sampling
+$$
+z = \ell_t
+$$
 
-Restricts sampling to the top $k$ most probable tokens:
+The model samples one new token:
 
-1. Find the $k$-th largest logit value.
-2. Set all logits below this threshold to $-\infty$.
-3. Renormalize and sample.
+$$
+x_{t+1} \sim \operatorname{Categorical}(\operatorname{softmax}(z))
+$$
 
-Default in project: **k = 50**
+and appends it to the context.
 
-### 4.3 Context Window Handling
+## Context Cropping
 
-When generated text exceeds `block_size`, only the last `block_size` tokens are used as context:
+The model can only use the last `block_size` tokens:
 
 ```python
 idx_cond = idx[:, -self.cfg.block_size:]
 ```
 
-This is a **sliding window** approach — the model always sees `block_size` (384) tokens of context.
+Current context length:
 
----
+$$
+T = 384
+$$
 
-## 5. Checkpoint Loading
+If the generated sequence becomes longer than 384 tokens, older tokens are dropped from the active context.
 
-### 5.1 Automatic Latest
+## Temperature
 
-```python
-def get_latest_checkpoint(checkpoint_dir="checkpoints"):
-    ckpts = [f for f in os.listdir(checkpoint_dir) if f.startswith("ckpt_step_")]
-    latest = sorted(ckpts, key=lambda x: int(x.split("_")[-1].split(".")[0]))[-1]
-    return os.path.join(checkpoint_dir, latest)
-```
+Temperature rescales logits:
 
-### 5.2 Manual Selection
+$$
+z'_i = \frac{z_i}{\tau}
+$$
 
-```bash
-python generate.py --checkpoint checkpoints/best_model.pt
-```
+where `tau` is temperature.
 
-### 5.3 State Dict Handling
+- Lower temperature makes output more deterministic.
+- Higher temperature makes output more random.
 
-The loader handles both full checkpoint dicts and raw state dicts:
+Current default in `generate.py`:
 
 ```python
-ckpt_data = torch.load(checkpoint_path, map_location=device, weights_only=False)
-state_dict = ckpt_data['model_state_dict'] if 'model_state_dict' in ckpt_data else ckpt_data
-model.load_state_dict(state_dict)
+temperature = 0.8
 ```
 
----
+## Top-k Sampling
 
-## 6. CLI Arguments
+Top-k keeps only the `k` most likely tokens:
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--prompt` | `"Once upon a time"` | Seed text for generation |
-| `--max-tokens` | `100` | Number of new tokens to generate |
-| `--checkpoint` | Latest | Path to specific checkpoint file |
+$$
+z_i =
+\begin{cases}
+z_i, & i \in \operatorname{TopK}(z,k) \\
+-\infty, & \text{otherwise}
+\end{cases}
+$$
+
+Current default:
+
+```python
+top_k = 50
+```
+
+## Interpreting Output
+
+The model is a base language model. It continues text; it does not automatically follow instructions.
+
+For example, the prompt:
+
+```text
+how can i help
+```
+
+is treated as a text prefix. A continuation such as article text, interview text, or dialogue text is expected from a base model. To make it respond like an assistant, the model needs instruction tuning on examples like:
+
+```text
+User: how can i help?
+Assistant: You can ask me to explain, summarize, debug, or write code.
+```
+

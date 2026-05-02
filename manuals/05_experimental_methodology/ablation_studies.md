@@ -1,159 +1,180 @@
-# Ablation Studies — Methodology, Toggle Reference & Expected Results
+# Ablation Studies
 
-## 1. What Are Ablation Studies?
+## Purpose
 
-An ablation study systematically **removes or disables** individual components of a system to measure their contribution. In deep learning, this proves that each architectural choice is mathematically necessary — not just copied from a tutorial.
+An ablation study disables one component at a time to measure what that component contributes. In this project, ablations answer:
 
-> **The difference between a student project and rigorous research:**
-> - Student: "I built a Transformer and it works."
-> - Researcher: "I built a Transformer, systematically isolated every variable, and proved exactly why it works."
+- Does RMSNorm stabilize training?
+- Does RoPE provide necessary positional information?
+- Does Flash Attention improve speed and memory without changing model math?
+- Does GQA reduce memory/parameters compared with full MHA?
 
----
+## Current Toggles
 
-## 2. Ablation Toggles in This Project
+All toggles are in `config.py` and are consumed by `model.py`.
 
-All toggles are defined in `config.py` and read by `model.py` at construction time:
+| Toggle | Default | Enabled behavior | Disabled behavior |
+| --- | --- | --- | --- |
+| `USE_RMSNORM` | True | RMSNorm in blocks and final norm | Identity/no normalization |
+| `USE_ROPE` | True | Apply RoPE to Q and K | No positional encoding |
+| `USE_FLASH_ATTENTION` | True | PyTorch causal SDPA | Manual attention implementation |
+| `USE_GQA` | True | 12 query heads, 4 KV heads | Full MHA with 12 KV heads |
 
-| Toggle | Default | What It Disables | Expected Failure Mode |
-|--------|---------|------------------|----------------------|
-| `USE_RMSNORM` | `True` | Pre-normalization in Transformer blocks | Gradient explosion → NaN loss within 100-500 steps |
-| `USE_ROPE` | `True` | Rotary Positional Embeddings on Q/K | Order-blindness → flat perplexity, broken grammar |
-| `USE_FLASH_ATTENTION` | `True` | PyTorch SDPA → manual matmul attention | 2-3× slower, 2× more VRAM (functionally identical) |
-| `USE_GQA` | `True` | Grouped-Query → Full Multi-Head Attention | More VRAM, slightly better quality at small scale |
+## Recommended Protocol
 
----
+Use the same:
 
-## 3. How To Run Ablation Studies
+- dataset
+- random seed
+- batch size
+- block size
+- model size
+- number of steps
+- evaluation interval
+- generation prompts
 
-### 3.1 Automated (Recommended)
+Change exactly one toggle at a time.
 
-Run the full ablation suite on `wizard_of_oz.txt` — takes ~5 minutes:
-
-```bash
-python -m ablation.run_ablation --steps 100
-```
-
-This produces a comparison table like:
-
-```
-Config                    |     Loss |      PPL |    Tok/s |  VRAM MB | Grad Norm | Status
-------------------------------------------------------------------------------------------
-Full Baseline (all ON)    |   7.1234 |   1241.3 |   45,000 |     3200 |      1.23 | ✅ Stable
-No RMSNorm                |      NaN |        ∞ |   44,000 |     3180 |        ∞  | 💥 Exploded
-No RoPE                   |   7.8456 |   2546.8 |   46,000 |     3100 |      1.18 | ⚠️ Bad grammar
-No Flash Attention         |   7.1189 |   1235.6 |   22,000 |     7800 |      1.24 | 🐢 2× slower
-Full MHA (no GQA)          |   7.0987 |   1206.1 |   38,000 |     4100 |      1.25 | ✅ More VRAM
-```
-
-### 3.2 Manual (Individual Toggle)
-
-Edit `config.py`:
+For quick tests, use:
 
 ```python
-USE_RMSNORM = False  # ← Flip one toggle at a time
+ACTIVE_PRESET = "wizard_of_oz_smoke"
 ```
 
-Then run training:
+For paper-quality ablations, choose a fixed small budget such as 2,000 or 5,000 steps on the same data slice.
 
-```bash
-python training.py
+## Metrics To Report
+
+| Metric | Why it matters |
+| --- | --- |
+| Final train loss | Shows optimization behavior |
+| Final validation loss | Shows generalization |
+| Perplexity | Interpretable language-model quality |
+| Tokens/sec | Throughput |
+| Peak VRAM | Memory efficiency |
+| Gradient norm | Stability |
+| Sample text | Qualitative behavior |
+| Failure status | NaN, OOM, stable, unstable |
+
+## RMSNorm Ablation
+
+Disable:
+
+```python
+USE_RMSNORM = False
 ```
 
-Watch the loss — you'll see the effect within minutes.
+The block becomes:
 
----
+$$
+u^{(l)} = h^{(l)} + \operatorname{Attn}(h^{(l)})
+$$
 
-## 4. Expected Results — Detailed Analysis
+$$
+h^{(l+1)} = u^{(l)} + \operatorname{FFN}(u^{(l)})
+$$
 
-### 4.1 No RMSNorm → Gradient Explosion
+Without normalization, activation scale can grow through residual additions:
 
-**What happens**: Without normalization before the attention and FFN sub-layers, each residual connection compounds the variance of the activations. After a few hundred steps, the floating-point numbers overflow.
+$$
+\|h^{(L)}\| \approx \|h^{(0)}\| + \sum_{l=0}^{L-1}\|f_l(h^{(l)})\|
+$$
 
-**Mathematical explanation**: The residual connection computes $x_{l+1} = x_l + f(x_l)$. Without normalization, $\|x_l\|$ grows unboundedly:
+Expected result:
 
-$$\|x_L\| \approx \|x_0\| + \sum_{l=0}^{L-1} \|f(x_l)\|$$
+- larger gradient norms
+- less stable loss
+- possible NaN if learning rate is too high
 
-With 12 layers, the variance accumulates rapidly, leading to numerical overflow.
+## RoPE Ablation
 
-**In the code**: When `USE_RMSNORM = False`, `model.py` replaces `RMSNorm` with `Identity` (a no-op pass-through).
+Disable:
 
-**What to report**: Loss curve showing stable training → sudden NaN. Screenshot of the exact step where it explodes. Gradient norm spiking to infinity.
+```python
+USE_ROPE = False
+```
 
----
+Without positional encoding, attention is permutation-equivariant. The model loses a direct way to distinguish order. It can still learn unigram and local statistical patterns through the sequence layout of training, but the architecture no longer has explicit position-aware attention scores.
 
-### 4.2 No RoPE → Order-Blind Model
+Expected result:
 
-**What happens**: Self-attention is permutation-equivariant by default. Without positional encoding, the model treats "dog bites man" and "man bites dog" as mathematically identical inputs.
+- worse validation loss
+- weaker grammar
+- poor long-range ordering
+- degraded continuation quality
 
-**Observable symptoms**:
-- Loss decreases (the model still learns vocabulary frequencies).
-- But generated text has random word order.
-- Perplexity plateaus higher than baseline.
-- Grammar quality is severely degraded.
+## Flash Attention Ablation
 
-**In the code**: When `USE_ROPE = False`, the `apply_rope()` calls are skipped. Q and K are used directly without rotation.
+Disable:
 
-**What to report**: Side-by-side text samples from baseline vs. no-RoPE. Perplexity comparison table. The model becomes a "bag of words".
+```python
+USE_FLASH_ATTENTION = False
+```
 
----
+This switches to `manual_causal_attention()`. The math remains:
 
-### 4.3 No Flash Attention → VRAM Explosion
+$$
+\operatorname{softmax}\left(\frac{QK^T}{\sqrt{d_h}} + M\right)V
+$$
 
-**What happens**: Standard attention materializes the full $T \times T$ attention matrix in GPU memory. Flash Attention (Dao, 2023) avoids this by computing attention in tiles.
+Expected result:
 
-**Observable symptoms**:
-- **Identical loss and perplexity** (mathematically equivalent).
-- **2-3× slower** per step (memory bandwidth bottleneck).
-- **2× more VRAM** usage (the attention matrix is $B \times H \times T \times T$).
+- similar loss and perplexity
+- lower tokens/sec
+- higher VRAM
 
-**In the code**: When `USE_FLASH_ATTENTION = False`, `model.py` uses `manual_causal_attention()` which explicitly computes `Q @ K.T`, applies a mask, softmax, and `@ V`.
+This is an efficiency ablation, not a modeling-quality ablation.
 
-**What to report**: VRAM comparison table. Tokens/sec comparison. This proves the hardware optimization, not model quality.
+## GQA Ablation
 
----
+Disable:
 
-### 4.4 Full MHA vs. GQA → VRAM vs. Quality Trade-off
+```python
+USE_GQA = False
+```
 
-**What happens**: Full MHA uses 12 KV heads (one per query head). GQA uses 4 KV heads shared across groups. Full MHA is slightly higher quality but uses more memory.
+The model changes from:
 
-**Observable symptoms**:
-- Full MHA may achieve slightly lower loss (more capacity in attention).
-- Full MHA uses ~25% more VRAM for the KV projections.
-- At this model scale (~85M params), the difference is small.
+$$
+H_q=12,\quad H_{kv}=4
+$$
 
-**In the code**: When `USE_GQA = False`, the attention module sets `n_kv_heads = n_head`, making it standard multi-head attention.
+to:
 
-**What to report**: Parameter count comparison, VRAM comparison, loss comparison after N steps.
+$$
+H_q=12,\quad H_{kv}=12
+$$
 
----
+Key-value projection parameters increase from:
 
-## 5. Interpreting Results for a Paper
+$$
+2(768)(4 \times 64)=393{,}216
+$$
 
-### 5.1 The Ablation Table
+to:
 
-The comparison table from `ablation/run_ablation.py` is designed to be copy-pasted directly into a LaTeX or Markdown paper. It proves:
+$$
+2(768)(12 \times 64)=1{,}179{,}648
+$$
 
-1. **RMSNorm is load-bearing** — remove it and training collapses.
-2. **RoPE is essential** — remove it and the model loses language structure.
-3. **Flash Attention is a hardware optimization** — identical quality, 2× efficiency.
-4. **GQA is a memory optimization** — small quality trade-off for significant VRAM savings.
+per layer.
 
-### 5.2 What Reviewers Look For
+Expected result:
 
-| ✅ Strong | ❌ Weak |
-|-----------|---------|
-| Quantitative comparison (PPL, VRAM, tok/s) | "I tried removing X and it broke" |
-| Multiple runs with standard deviation | Single run, no error bars |
-| Clear causal explanation (math + evidence) | "It just didn't work" |
-| Control variables (same data, same steps) | Different data or steps per config |
+- more parameters
+- more memory
+- possibly slightly better quality
+- slower training
 
----
+## Suggested Paper Table
 
-## 6. Files Reference
+| Variant | Val loss | PPL | Tok/s | VRAM MB | Status |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Full model | fill in | fill in | fill in | fill in | stable |
+| No RMSNorm | fill in | fill in | fill in | fill in | expected unstable |
+| No RoPE | fill in | fill in | fill in | fill in | expected worse quality |
+| No Flash Attention | fill in | fill in | fill in | fill in | expected slower |
+| Full MHA | fill in | fill in | fill in | fill in | expected more memory |
 
-| File | Purpose |
-|------|---------|
-| `config.py` — ablation toggles | `USE_RMSNORM`, `USE_ROPE`, `USE_FLASH_ATTENTION`, `USE_GQA` |
-| `model.py` — conditional paths | `Identity` class, `manual_causal_attention()`, toggle checks |
-| `ablation/run_ablation.py` | Automated runner, comparison table, JSON results |
-| `logs/ablation/ablation_results.json` | Machine-readable results for plotting |
+Do not report expected values as measured values. Run the ablation script or controlled manual runs, then fill in the table.
+

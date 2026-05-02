@@ -1,101 +1,80 @@
-# Checkpoint Management — Resume, Best-Model Tracking & Artifact Inventory
+# Checkpoint Management
 
-## 1. Checkpoint Types
+## Checkpoint Types
 
-| Type | Filename Pattern | Trigger | Purpose |
-|------|-----------------|---------|---------|
-| Periodic | `checkpoints/ckpt_step_<N>.pt` | Every `checkpoint_interval` steps | Resume training after interruption |
-| Best Validation | `checkpoints/best_model.pt` | When `val_loss` improves | Inference / deployment |
+The project uses two checkpoint types:
 
----
+| Type | Path | Purpose |
+| --- | --- | --- |
+| Periodic | `checkpoints/ckpt_step_<N>.pt` | Resume training |
+| Best | `checkpoints/best_model.pt` | Best validation loss so far |
 
-## 2. Checkpoint Contents
+## Checkpoint Contents
 
-Each `.pt` file is a Python dictionary saved with `torch.save()`:
+Each checkpoint stores:
 
-```python
-{
-    'step': int,                    # Training step at save time
-    'model_state_dict': OrderedDict,# All model parameters
-    'optimizer_state_dict': dict,   # AdamW momentum & variance buffers
-    'loss': float,                  # Last training batch loss
-    'best_val_loss': float,         # Best validation loss seen so far
-}
+```text
+step
+model_state_dict
+optimizer_state_dict
+loss
+best_val_loss
 ```
 
----
+This means training can resume with optimizer momentum and best validation state intact.
 
-## 3. Auto-Resume Mechanism
+## Current Observed State
 
-When `training.py` starts:
+The latest observed periodic checkpoint is:
 
-1. Scan `checkpoints/` for files matching `ckpt_step_*.pt`.
-2. Sort by step number (extracted from filename).
-3. Load the highest-step checkpoint.
-4. Restore model weights, optimizer state, step counter, and best val loss.
-5. Resume training from `step + 1`.
-
-No special flag or CLI argument is needed — resume is fully automatic.
-
----
-
-## 4. Best-Model Tracking
-
-During evaluation:
-
-```python
-if val_loss < best_val_loss:
-    best_val_loss = val_loss
-    torch.save(checkpoint, "checkpoints/best_model.pt")
+```text
+checkpoints/ckpt_step_60000.pt
 ```
 
-Only one `best_model.pt` exists at any time — it is overwritten whenever validation loss improves.
+Each checkpoint is approximately 1.32 GB.
 
----
+## Resume Behavior
 
-## 5. Checkpoint Size
+`training.py` scans for:
 
-| Component | Size |
-|-----------|------|
-| Model state dict | ~355 MB |
-| Optimizer state dict | ~745 MB |
-| Metadata | < 1 KB |
-| **Total per checkpoint** | **~1.1 GB** |
+```text
+ckpt_step_*.pt
+```
 
-With `checkpoint_interval = 1,000` over 300K steps: up to 300 periodic checkpoints (~330 GB total). Consider periodically deleting old checkpoints.
+sorts by step number, loads the latest, and starts from:
 
----
+$$
+\text{start step} = \text{checkpoint step} + 1
+$$
 
-## 6. Artifact Inventory
+## Best Model Behavior
 
-### Production Artifacts
+At each evaluation interval, if:
 
-| Artifact | Location | Producer |
-|----------|----------|----------|
-| `bpe_tokenizer_32k.json` | Project root | `prepare_data.py` |
-| `train.bin` | Project root | `prepare_data.py` |
-| `val.bin` | Project root | `prepare_data.py` |
-| `ckpt_step_<N>.pt` | `checkpoints/` | `training.py` |
-| `best_model.pt` | `checkpoints/` | `training.py` |
-| `performance_trace.json` | Project root | `training.py` (profiler) |
+$$
+\mathcal{L}_{val} < \mathcal{L}_{best}
+$$
 
-### Research Artifacts
+then `best_model.pt` is overwritten.
 
-| Artifact | Location | Producer |
-|----------|----------|----------|
-| `bpe_tokenizer_wizard.json` | `Research/` | Tokenizer.ipynb |
-| `embedding_sgns_wizard.pt` | `Research/` | Embeddings.ipynb |
-| `attention_model_wizard.pt` | `Research/` | Attention.ipynb |
-| `full_architecture_model_wizard.pt` | `Research/` | Full_Architecture.ipynb |
-| `full_arch_last.pt` | `Research/checkpoints_full_arch/` | Full_Architecture.ipynb |
+## Disk Management
 
----
+Many checkpoints consume large disk space. A typical policy is:
 
-## 7. Checkpoint Compatibility
+- keep `best_model.pt`
+- keep the latest checkpoint
+- keep milestone checkpoints such as 10k, 30k, 60k
+- remove intermediate checkpoints only after confirming training can resume
 
-**Important**: Checkpoints are tied to the model architecture defined in `config.py`. If you change any of these values, existing checkpoints become incompatible:
+Do not delete checkpoints while training is running.
 
-- `n_embd`, `n_layer`, `n_head`, `n_kv_heads`
-- `ffn_mult`, `vocab_size`, `dropout`
+## Loading For Generation
 
-Always start fresh (delete `checkpoints/`) when changing architecture parameters.
+Use:
+
+```powershell
+python generate.py --checkpoint checkpoints/best_model.pt --prompt "Once upon a time"
+```
+
+or omit `--checkpoint` to use the latest periodic checkpoint.
+
