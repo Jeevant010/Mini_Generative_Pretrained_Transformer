@@ -1,119 +1,127 @@
-# Mini GPT Project Manuals
+# Mini Generative Pretrained Transformer — The Book
 
-This directory is the current technical manual set for the Mini Generative Pretrained Transformer project. It reflects the active codebase as of the current `subset_10gb` configuration:
+A beginner-friendly guide to building, training, and understanding a GPT-style language model from scratch.
 
-- Decoder-only GPT language model
-- 117,787,392 trainable parameters
-- 12 Transformer blocks
-- 768-dimensional embeddings
-- 12 query heads and 4 key-value heads
-- Grouped-Query Attention (GQA)
-- Rotary Positional Embeddings (RoPE)
-- RMSNorm
-- SwiGLU feed-forward blocks
-- Flash Attention through PyTorch scaled dot-product attention
-- Tied token embedding and language-model head weights
-- Byte-level BPE tokenizer with 32,000 vocabulary entries
-- 10 GB tokenized dataset target
-- Memory-mapped `train.bin` and `val.bin`
+---
 
-## Current Experimental Snapshot
+## What This Is
 
-| Item | Value |
-| --- | --- |
-| Active preset | `subset_10gb` |
-| Train binary | `train.bin`, 5,100,766,548 tokens |
-| Validation binary | `val.bin`, 267,942,572 tokens |
-| Latest observed checkpoint | `checkpoints/ckpt_step_60000.pt` |
-| Latest observed validation loss | 3.517095 |
-| Latest observed perplexity | 33.69 |
-| Hardware observed | NVIDIA GeForce RTX 4060 Laptop GPU |
+This is a complete educational book about building a 118-million-parameter language model on a single laptop GPU. It covers everything from "What is a language model?" to real training outputs, quality metrics, ablation studies, and lessons learned from mistakes.
 
-## Directory Structure
+**No prior machine learning experience required.** Every concept is explained in plain English first, with optional math sections for those who want the details.
 
-```text
-manuals/
-|-- 01_project_overview/
-|   `-- project_overview.md
-|-- 02_theoretical_foundations/
-|   |-- transformer_architecture.md
-|   |-- attention_mechanisms.md
-|   `-- tokenization_theory.md
-|-- 03_system_architecture/
-|   |-- codebase_structure.md
-|   |-- model_architecture.md
-|   `-- data_pipeline.md
-|-- 04_implementation_details/
-|   |-- config_reference.md
-|   |-- training_pipeline.md
-|   |-- inference_pipeline.md
-|   |-- tokenizer_implementation.md
-|   |-- evaluation_metrics.md
-|   `-- hyperparameter_presets.md
-|-- 05_experimental_methodology/
-|   |-- research_notebooks.md
-|   |-- hardware_profiling.md
-|   |-- training_progression.md
-|   |-- ablation_studies.md
-|   `-- verification_guide.md
-|-- 06_reproducibility/
-|   |-- environment_setup.md
-|   |-- quick_start_guide.md
-|   `-- checkpoint_management.md
-|-- 07_appendices/
-|   |-- glossary.md
-|   |-- references.md
-|   `-- license_and_attribution.md
-|-- 08_evaluation_harness/          ← NEW
-|   |-- evaluation_harness_guide.md
-|   `-- generation_quality_metrics.md
-|-- 09_post_training/               ← NEW
-|   |-- 01_overview_base_to_chat.md
-|   |-- 02_supervised_fine_tuning.md
-|   |-- 03_dpo_preference_alignment.md
-|   `-- 04_chat_templates_and_deployment.md
-`-- 10_data_quality/                ← NEW
-    `-- openwebtext_analysis.md
-```
+---
 
-## Reading Order
+## Table of Contents
 
-### For Understanding the Current Model (Pre-Training)
+### Chapter 1: What Is This?
+| Section | Topic |
+|---|---|
+| [01 — What Is a Language Model?](ch01_what_is_this/01_what_is_a_language_model.md) | The simplest explanation, with real model outputs |
+| [02 — What Is GPT?](ch01_what_is_this/02_what_is_gpt.md) | History of GPT, our model vs GPT-2 and GPT-4 |
+| [03 — Why Build Your Own?](ch01_what_is_this/03_why_build_your_own.md) | What you learn by building vs using APIs |
+| [04 — What You Will Learn](ch01_what_is_this/04_what_you_will_learn.md) | Roadmap of all chapters |
 
-1. `01_project_overview/project_overview.md`
-2. `02_theoretical_foundations/transformer_architecture.md`
-3. `02_theoretical_foundations/attention_mechanisms.md`
-4. `03_system_architecture/model_architecture.md`
-5. `03_system_architecture/data_pipeline.md`
-6. `04_implementation_details/training_pipeline.md`
-7. `05_experimental_methodology/training_progression.md`
-8. `05_experimental_methodology/ablation_studies.md`
+### Chapter 2: How Text Becomes Numbers
+| Section | Topic |
+|---|---|
+| [01 — Characters to Tokens](ch02_how_text_becomes_numbers/01_characters_to_tokens.md) | Why we need tokenization |
+| [02 — BPE Algorithm Explained](ch02_how_text_becomes_numbers/02_bpe_algorithm_explained.md) | Byte Pair Encoding step by step |
+| [03 — Our Tokenizer](ch02_how_text_becomes_numbers/03_our_tokenizer.md) | Implementation, encoding/decoding, storage |
+| [04 — Special Tokens](ch02_how_text_becomes_numbers/04_special_tokens.md) | pad, bos, eos, unk — what each does |
 
-### For Evaluation and Metrics
+### Chapter 3: The Transformer
+| Section | Topic |
+|---|---|
+| [01 — What Is a Transformer?](ch03_the_transformer/01_what_is_a_transformer.md) | Big picture overview |
+| [02 — Embeddings](ch03_the_transformer/02_embeddings.md) | How tokens become vectors |
+| [03 — Attention for Beginners](ch03_the_transformer/03_attention_for_beginners.md) | Q/K/V, multi-head, GQA, causal mask |
+| [04 — RoPE: Positions](ch03_the_transformer/04_rope_positions.md) | How the model knows word order |
+| [05 — SwiGLU Feed-Forward](ch03_the_transformer/05_feed_forward_swiglu.md) | The gated feed-forward layer |
+| [06 — RMSNorm](ch03_the_transformer/06_rmsnorm.md) | Keeping numbers stable |
+| [07 — Putting It Together](ch03_the_transformer/07_putting_it_together.md) | Full block, residual connections, 12-layer stack |
+| [08 — Our Model in Numbers](ch03_the_transformer/08_our_model_numbers.md) | Complete spec, parameter breakdown, memory usage |
 
-9. `04_implementation_details/evaluation_metrics.md` — basic metrics (loss, PPL, throughput)
-10. `08_evaluation_harness/generation_quality_metrics.md` — advanced metrics (Distinct-N, Self-BLEU, Entropy)
-11. `08_evaluation_harness/evaluation_harness_guide.md` — standardized benchmarks (HellaSwag, ARC, etc.)
+### Chapter 4: The Data Pipeline
+| Section | Topic |
+|---|---|
+| [01 — Where Does Training Data Come From?](ch04_data_pipeline/01_where_does_training_data_come_from.md) | OpenWebText, Reddit sourcing, content types |
+| [02 — Filtering for Quality](ch04_data_pipeline/02_filtering_for_quality.md) | All quality filters explained |
+| [03 — Tokenizing Billions of Words](ch04_data_pipeline/03_tokenizing_billions.md) | Batch tokenization, memory mapping, random sampling |
 
-### For Post-Training (Building a Conversational Model)
+### Chapter 5: Training
+| Section | Topic |
+|---|---|
+| [01 — What Happens During Training](ch05_training/01_what_happens_during_training.md) | Forward/backward pass, optimizer, gradient clipping |
+| [02 — Loss, Learning Rate, and Checkpoints](ch05_training/02_loss_and_learning_rate.md) | Loss/PPL explained, cosine schedule, saving progress |
 
-12. `09_post_training/01_overview_base_to_chat.md` — the 4-stage pipeline overview
-13. `09_post_training/02_supervised_fine_tuning.md` — SFT implementation guide
-14. `09_post_training/03_dpo_preference_alignment.md` — DPO implementation guide
-15. `09_post_training/04_chat_templates_and_deployment.md` — deployment and chat interface
+### Chapter 6: Watching Training Happen ⭐
+| Section | Topic |
+|---|---|
+| [01 — From Gibberish to English](ch06_watching_training/01_from_gibberish_to_english.md) | **Real outputs at every stage** — step 0 to 122K |
+| [02 — Loss and Perplexity Timeline](ch06_watching_training/02_loss_and_perplexity_timeline.md) | Full metrics timeline with analysis |
 
-### For Data Quality
+### Chapter 7: Measuring Quality
+| Section | Topic |
+|---|---|
+| [01 — Perplexity Explained](ch07_measuring_quality/01_perplexity_explained.md) | What PPL means, reference values |
+| [02 — Diversity and Repetition Metrics](ch07_measuring_quality/02_diversity_metrics.md) | Distinct-N, Self-BLEU, Entropy, repetition detection |
 
-16. `10_data_quality/openwebtext_analysis.md` — data composition, non-English filtering, scaling laws
+### Chapter 8: Ablation Studies
+| Section | Topic |
+|---|---|
+| [01 — What Is an Ablation Study?](ch08_ablation_studies/01_what_is_ablation.md) | Methodology, toggle system, how to read results |
+| [02 — Component Ablations](ch08_ablation_studies/02_component_ablations.md) | RMSNorm, RoPE, Flash Attention, GQA details |
 
-## Important Interpretation
+### Chapter 9: Mistakes and Lessons ⭐
+| Section | Topic |
+|---|---|
+| [01 — The Non-English Gibberish Problem](ch09_mistakes_and_lessons/01_non_english_gibberish.md) | The "ibn nimy" bug — causes and fixes |
+| [02 — Repetition Loops](ch09_mistakes_and_lessons/02_repetition_loops.md) | Why models repeat, how to detect and fix it |
+| [03 — Key Takeaways](ch09_mistakes_and_lessons/03_key_takeaways.md) | 8 lessons learned + what we would do differently |
 
-The trained model is a base language model. It learns:
+### Chapter 10: What Comes Next
+| Section | Topic |
+|---|---|
+| [01 — From Prediction to Conversation](ch10_whats_next/01_from_prediction_to_conversation.md) | SFT → DPO → Chat roadmap |
+| [02 — Branch Strategy](ch10_whats_next/02_branch_strategy.md) | Git plan, push checklist, what goes where |
 
-$$
-P(x_t \mid x_{<t})
-$$
+### Appendices
+| Section | Topic |
+|---|---|
+| [Glossary](appendices/glossary.md) | Every technical term explained in plain English |
+| [Codebase Map](appendices/codebase_map.md) | Every file and its purpose |
+| [Config Reference](appendices/config_reference.md) | All settings with descriptions |
+| [References](appendices/references.md) | Academic papers cited |
+| [Quick Start](appendices/quick_start.md) | Setup and run in 4 steps |
 
-It does not automatically learn to behave like a chat assistant unless the training or fine-tuning data contains instruction-response examples. Therefore, generated text should be evaluated as text continuation, not as aligned assistant behavior.
+### Advanced (Future Work)
+| Section | Topic |
+|---|---|
+| [README](advanced/README.md) | Overview of post-training guides |
+| SFT, DPO, Chat Templates, Evaluation Harness, Data Analysis | Detailed guides for the next branch |
 
-To make the model conversational, follow the post-training pipeline documented in `09_post_training/`.
+---
+
+## Reading Guide
+
+**Complete beginner?** → Read Chapters 1–6 in order. Skip math on first read.
+
+**Know Python, not ML?** → Read everything in order. The math will make sense.
+
+**Know ML already?** → Jump to Chapters 6, 7, 9 for results, metrics, and lessons.
+
+**Here for the code?** → See [Codebase Map](appendices/codebase_map.md) then dive in.
+
+---
+
+## The Model
+
+| Property | Value |
+|---|---|
+| Architecture | Decoder-only Transformer |
+| Parameters | 117,787,392 (~118M) |
+| Components | GQA, RoPE, RMSNorm, SwiGLU, Flash Attention |
+| Training data | 10 GB OpenWebText (5.1B tokens) |
+| Hardware | NVIDIA RTX 4060 Laptop GPU (8 GB VRAM) |
+| Best perplexity | 33.69 at step 60,000 |
