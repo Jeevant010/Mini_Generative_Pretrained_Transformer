@@ -91,7 +91,7 @@ graphify-out/
 
 # --- Mini GPT Project Specific ---
 # Training logs & generated samples (regenerated, not needed in git)
-logs/
+# logs/
 subsets/
 
 # Ablation temporary data (created by run_ablation.py from wizard_of_oz.txt)
