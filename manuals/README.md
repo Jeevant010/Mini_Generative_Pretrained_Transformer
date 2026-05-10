@@ -54,18 +54,25 @@ This is a complete educational book about building a 118-million-parameter langu
 |---|---|
 | [01 — What Happens During Training](ch05_training/01_what_happens_during_training.md) | Forward/backward pass, optimizer, gradient clipping |
 | [02 — Loss, Learning Rate, and Checkpoints](ch05_training/02_loss_and_learning_rate.md) | Loss/PPL explained, cosine schedule, saving progress |
+| [03 — The Learning Rate Schedule](ch05_training/03_learning_rate_schedule.md) | Warmup, cosine decay, why decay matters |
+| [04 — Checkpointing and Resume](ch05_training/04_checkpointing_and_resume.md) | What is saved, auto-resume, best model tracking |
+| [05 — Mixed Precision Training](ch05_training/05_mixed_precision.md) | bfloat16, what is "mixed", memory savings |
+| [06 — Our Hardware](ch05_training/06_our_hardware.md) | RTX 4060 specs, GPU compatibility guide |
 
 ### Chapter 6: Watching Training Happen ⭐
 | Section | Topic |
 |---|---|
 | [01 — From Gibberish to English](ch06_watching_training/01_from_gibberish_to_english.md) | **Real outputs at every stage** — step 0 to 122K |
 | [02 — Loss and Perplexity Timeline](ch06_watching_training/02_loss_and_perplexity_timeline.md) | Full metrics timeline with analysis |
+| [03 — The Degeneration Problem](ch06_watching_training/03_the_degeneration_problem.md) | Three types of degeneration we observed |
+| [04 — Prompt Outputs Archive](ch06_watching_training/04_prompt_outputs_archive.md) | Complete archive of old and new outputs |
 
 ### Chapter 7: Measuring Quality
 | Section | Topic |
 |---|---|
 | [01 — Perplexity Explained](ch07_measuring_quality/01_perplexity_explained.md) | What PPL means, reference values |
 | [02 — Diversity and Repetition Metrics](ch07_measuring_quality/02_diversity_metrics.md) | Distinct-N, Self-BLEU, Entropy, repetition detection |
+| [03 — Benchmarks](ch07_measuring_quality/03_benchmarks.md) | HellaSwag, ARC, LAMBADA — expected scores and scaling |
 
 ### Chapter 8: Ablation Studies
 | Section | Topic |
@@ -79,6 +86,9 @@ This is a complete educational book about building a 118-million-parameter langu
 | [01 — The Non-English Gibberish Problem](ch09_mistakes_and_lessons/01_non_english_gibberish.md) | The "ibn nimy" bug — causes and fixes |
 | [02 — Repetition Loops](ch09_mistakes_and_lessons/02_repetition_loops.md) | Why models repeat, how to detect and fix it |
 | [03 — Key Takeaways](ch09_mistakes_and_lessons/03_key_takeaways.md) | 8 lessons learned + what we would do differently |
+| [04 — Overfitting Signals](ch09_mistakes_and_lessons/04_overfitting_signals.md) | Train-val gap, detection, vs degeneration |
+| [05 — The Learning Rate Decay Trap](ch09_mistakes_and_lessons/05_learning_rate_decay_trap.md) | How early mistakes freeze into the model |
+| [06 — Data Quality Issues](ch09_mistakes_and_lessons/06_data_quality_issues.md) | Non-English leaks, repetitive content, topical bias |
 
 ### Chapter 10: What Comes Next
 | Section | Topic |
@@ -95,11 +105,17 @@ This is a complete educational book about building a 118-million-parameter langu
 | [References](appendices/references.md) | Academic papers cited |
 | [Quick Start](appendices/quick_start.md) | Setup and run in 4 steps |
 
-### Advanced (Future Work)
+### Advanced (Future Work — Post-Training Branch)
 | Section | Topic |
 |---|---|
 | [README](advanced/README.md) | Overview of post-training guides |
-| SFT, DPO, Chat Templates, Evaluation Harness, Data Analysis | Detailed guides for the next branch |
+| [01 — Base to Chat Overview](advanced/01_overview_base_to_chat.md) | 4-stage pipeline |
+| [02 — Supervised Fine-Tuning](advanced/02_supervised_fine_tuning.md) | SFT with Dolly 15K |
+| [03 — DPO Alignment](advanced/03_dpo_preference_alignment.md) | Direct Preference Optimization |
+| [04 — Chat Templates](advanced/04_chat_templates_and_deployment.md) | Chat interface and deployment |
+| [Evaluation Harness](advanced/evaluation_harness_guide.md) | lm-eval-harness setup |
+| [Quality Metrics Deep Dive](advanced/generation_quality_metrics.md) | Full Distinct-N/Self-BLEU math |
+| [OpenWebText Analysis](advanced/openwebtext_analysis.md) | Data composition and scaling laws |
 
 ---
 
@@ -125,3 +141,4 @@ This is a complete educational book about building a 118-million-parameter langu
 | Training data | 10 GB OpenWebText (5.1B tokens) |
 | Hardware | NVIDIA RTX 4060 Laptop GPU (8 GB VRAM) |
 | Best perplexity | 33.69 at step 60,000 |
+| Training status | Active — approaching 150K steps |
