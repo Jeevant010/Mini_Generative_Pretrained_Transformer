@@ -60,15 +60,25 @@ manuals/
 |   |-- environment_setup.md
 |   |-- quick_start_guide.md
 |   `-- checkpoint_management.md
-`-- 07_appendices/
-    |-- glossary.md
-    |-- references.md
-    `-- license_and_attribution.md
+|-- 07_appendices/
+|   |-- glossary.md
+|   |-- references.md
+|   `-- license_and_attribution.md
+|-- 08_evaluation_harness/          ← NEW
+|   |-- evaluation_harness_guide.md
+|   `-- generation_quality_metrics.md
+|-- 09_post_training/               ← NEW
+|   |-- 01_overview_base_to_chat.md
+|   |-- 02_supervised_fine_tuning.md
+|   |-- 03_dpo_preference_alignment.md
+|   `-- 04_chat_templates_and_deployment.md
+`-- 10_data_quality/                ← NEW
+    `-- openwebtext_analysis.md
 ```
 
 ## Reading Order
 
-For a research paper or project report, read these in order:
+### For Understanding the Current Model (Pre-Training)
 
 1. `01_project_overview/project_overview.md`
 2. `02_theoretical_foundations/transformer_architecture.md`
@@ -78,6 +88,23 @@ For a research paper or project report, read these in order:
 6. `04_implementation_details/training_pipeline.md`
 7. `05_experimental_methodology/training_progression.md`
 8. `05_experimental_methodology/ablation_studies.md`
+
+### For Evaluation and Metrics
+
+9. `04_implementation_details/evaluation_metrics.md` — basic metrics (loss, PPL, throughput)
+10. `08_evaluation_harness/generation_quality_metrics.md` — advanced metrics (Distinct-N, Self-BLEU, Entropy)
+11. `08_evaluation_harness/evaluation_harness_guide.md` — standardized benchmarks (HellaSwag, ARC, etc.)
+
+### For Post-Training (Building a Conversational Model)
+
+12. `09_post_training/01_overview_base_to_chat.md` — the 4-stage pipeline overview
+13. `09_post_training/02_supervised_fine_tuning.md` — SFT implementation guide
+14. `09_post_training/03_dpo_preference_alignment.md` — DPO implementation guide
+15. `09_post_training/04_chat_templates_and_deployment.md` — deployment and chat interface
+
+### For Data Quality
+
+16. `10_data_quality/openwebtext_analysis.md` — data composition, non-English filtering, scaling laws
 
 ## Important Interpretation
 
@@ -89,3 +116,4 @@ $$
 
 It does not automatically learn to behave like a chat assistant unless the training or fine-tuning data contains instruction-response examples. Therefore, generated text should be evaluated as text continuation, not as aligned assistant behavior.
 
+To make the model conversational, follow the post-training pipeline documented in `09_post_training/`.
