@@ -215,16 +215,73 @@ class GPTLanguageModel(nn.Module):
         return logits, loss
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None,
+                 top_p=None, repetition_penalty=1.0, stop_token_id=None):
+        """
+        Autoregressive text generation with enhanced sampling controls.
+
+        Args:
+            idx: Input token IDs [batch, seq_len].
+            max_new_tokens: Number of tokens to generate.
+            temperature: Sampling temperature (higher = more random).
+            top_k: Keep only top-k tokens before sampling.
+            top_p: Nucleus sampling — keep smallest set of tokens whose
+                   cumulative probability exceeds top_p. Recommended: 0.9.
+            repetition_penalty: Penalize tokens that already appeared in the
+                                context. Values > 1.0 reduce repetition.
+                                Recommended: 1.1–1.3.
+            stop_token_id: If set, stop generation when this token is produced.
+        """
         self.eval()
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.cfg.block_size:]
             logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / temperature
+            logits = logits[:, -1, :]  # [batch, vocab]
+
+            # ── Repetition Penalty ──
+            # Reduce the logit of tokens that have already appeared in the
+            # generated sequence. This breaks repetition loops like
+            # "ibn nimy ibn nimy ibn nimy..." observed at later checkpoints.
+            if repetition_penalty != 1.0:
+                for batch_idx in range(idx.size(0)):
+                    generated_tokens = set(idx[batch_idx].tolist())
+                    for token_id in generated_tokens:
+                        if logits[batch_idx, token_id] > 0:
+                            logits[batch_idx, token_id] /= repetition_penalty
+                        else:
+                            logits[batch_idx, token_id] *= repetition_penalty
+
+            # ── Temperature ──
+            logits = logits / temperature
+
+            # ── Top-k Filtering ──
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = -float('Inf')
+
+            # ── Top-p (Nucleus) Filtering ──
+            # Keep the smallest set of tokens whose cumulative probability
+            # exceeds top_p. This adapts the number of candidate tokens
+            # based on the model's confidence at each step.
+            if top_p is not None:
+                sorted_logits, sorted_indices = torch.sort(
+                    logits, descending=True
+                )
+                cumulative_probs = torch.cumsum(
+                    F.softmax(sorted_logits, dim=-1), dim=-1
+                )
+                # Remove tokens with cumulative probability above top_p
+                sorted_mask = cumulative_probs - F.softmax(sorted_logits, dim=-1) >= top_p
+                sorted_logits[sorted_mask] = -float('Inf')
+                # Scatter back to original indices
+                logits = sorted_logits.scatter(1, sorted_indices, sorted_logits)
+
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
+
+            # ── Stop Token ──
+            if stop_token_id is not None and idx_next.item() == stop_token_id:
+                break
+
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
