@@ -2,7 +2,9 @@
 
 > **Note:** The files in this folder are for the **next branch** (post-training). They document Supervised Fine-Tuning (SFT), Direct Preference Optimization (DPO), chat templates, evaluation harness setup, and data quality analysis. These guides will be implemented after the pre-training phase is pushed and the `post-training` branch is created.
 
+
 ## Contents
+
 
 | File | Topic |
 |---|---|
