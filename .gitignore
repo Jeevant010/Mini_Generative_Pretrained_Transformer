@@ -240,3 +240,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.gitnexus
+
+AGENTS.md
+CLAUDE.md
+.claude/
