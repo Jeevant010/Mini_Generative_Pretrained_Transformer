@@ -12,11 +12,6 @@ IIIT Surat
 Surat, India  
 deepeshdangi700@gmail.com
 
-Bhupendra Kumar  
-Department of Computer Science and Engineering  
-IIIT Surat  
-Surat, India  
-email or ORCID
 
 ## Abstract
 
