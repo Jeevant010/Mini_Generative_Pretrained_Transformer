@@ -284,7 +284,7 @@ if ACTIVE_PRESET is not None:
             f"Available: {', '.join(PRESETS.keys())}"
         )
     _preset = PRESETS[ACTIVE_PRESET]
-    print(f"⚙️  Applying preset: {ACTIVE_PRESET}")
+    print(f"[PRESET] Applying preset: {ACTIVE_PRESET}")
     print(f"   {_preset.get('_description', '')}")
     print(f"   Est. time: {_preset.get('_est_time', 'N/A')} | Est. params: {_preset.get('_est_params', 'N/A')}")
     for _k, _v in _preset.items():

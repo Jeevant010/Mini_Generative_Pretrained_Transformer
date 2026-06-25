@@ -49,11 +49,11 @@ def main():
     
     model.load_state_dict(state_dict)
     model.eval()
-    print("✅ Model ready for inference.")
+    print("[OK] Model ready for inference.")
 
     # 4. Generate
     print(f"\nPrompt: {args.prompt}")
-    print(f"{'─'*50}")
+    print(f"{'-'*50}")
     
     # Encode prompt
     context_ids = tokenizer.encode(args.prompt, add_bos=True)
@@ -65,7 +65,7 @@ def main():
     # Decode
     generated_text = tokenizer.decode(output_ids[0].tolist(), skip_special_tokens=True)
     print(generated_text)
-    print(f"{'─'*50}")
+    print(f"{'-'*50}")
 
     # Save if requested
     if args.save:
