@@ -137,7 +137,8 @@ def train_dpo():
 
     # Create reference model (frozen copy of SFT model)
     print("Cloning reference model...")
-    ref_model = copy.deepcopy(policy_model)
+    ref_model = GPTLanguageModel(config).to(device)
+    ref_model.load_state_dict(policy_model.state_dict())
     ref_model.eval()
     for param in ref_model.parameters():
         param.requires_grad = False
