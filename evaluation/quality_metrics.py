@@ -283,9 +283,8 @@ def print_report(metrics):
     print(f"  Generated Samples")
     print(f"{'-'*40}")
     for prompt, sample in metrics.get("samples", []):
-        preview = sample[:150] + "..." if len(sample) > 150 else sample
         print(f"\n  Prompt: \"{prompt}\"")
-        print(f"  Output: {preview}")
+        print(f"  Output:\n{sample}")
 
     print(f"\n{'='*65}\n")
 
