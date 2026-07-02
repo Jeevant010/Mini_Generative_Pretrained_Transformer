@@ -36,17 +36,23 @@ def train_sft():
     tokenizer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', config.TOKENIZER_PATH))
     tokenizer = BytePairTokenizer.load(tokenizer_path)
 
-    # Load base model from best pre-training checkpoint
+    # Load model (resume from SFT checkpoint if it exists, else base model)
     model = GPTLanguageModel(config).to(device)
+    sft_ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'checkpoints', 'sft', 'best_sft_model.pt'))
     base_ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'checkpoints', 'best_model.pt'))
     
-    print(f"Loading base model from {base_ckpt_path}")
-    base_ckpt = torch.load(base_ckpt_path, map_location=device, weights_only=False)
-    state_dict = base_ckpt["model_state_dict"] if "model_state_dict" in base_ckpt else base_ckpt
+    start_step = 0
+    if os.path.exists(sft_ckpt_path):
+        print(f"Resuming from SFT checkpoint: {sft_ckpt_path}")
+        ckpt = torch.load(sft_ckpt_path, map_location=device, weights_only=False)
+        start_step = ckpt.get('step', 0)
+    else:
+        print(f"Loading base model from {base_ckpt_path}")
+        ckpt = torch.load(base_ckpt_path, map_location=device, weights_only=False)
+        
+    state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
     model.load_state_dict(state_dict)
-    
-    step_val = base_ckpt.get('step', '?') if isinstance(base_ckpt, dict) else 'Unknown'
-    print(f"Loaded base model from step {step_val}")
+    print(f"Loaded model successfully. Resuming SFT from step {start_step}.")
 
     # SFT hyperparameters
     sft_lr = 2e-5
@@ -71,7 +77,7 @@ def train_sft():
     os.makedirs(ckpt_dir, exist_ok=True)
     
     model.train()
-    step = 0
+    step = start_step
     best_val_loss = float("inf")
 
     steps_per_epoch = len(dataset.train_examples) // sft_batch_size
@@ -91,7 +97,10 @@ def train_sft():
                 dtype=torch.bfloat16,
             ):
                 logits, _ = model(xb)
-                loss = sft_loss(logits, yb)
+                # Shift logits and labels by 1 so token N predicts token N+1
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = yb[..., 1:].contiguous()
+                loss = sft_loss(shift_logits, shift_labels)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -104,7 +113,7 @@ def train_sft():
             step += 1
 
             if step % 10 == 0:
-                print(f"  Step {step:4d} | Loss: {loss.item():.4f} | {dt*1000:.0f}ms/step")
+                print(f"  Step {step:4d} | Loss: {loss.item():.4f} | {dt*1000:.0f}ms/step", flush=True)
 
             # Evaluation
             if step % eval_interval == 0:
@@ -114,10 +123,12 @@ def train_sft():
                     vx, vy = dataset.get_batch("val", sft_batch_size)
                     with torch.no_grad():
                         vlogits, _ = model(vx)
-                        vloss = sft_loss(vlogits, vy)
+                        shift_vlogits = vlogits[..., :-1, :].contiguous()
+                        shift_vy = vy[..., 1:].contiguous()
+                        vloss = sft_loss(shift_vlogits, shift_vy)
                     val_losses.append(vloss.item())
                 avg_val = sum(val_losses) / len(val_losses)
-                print(f"  >>> Eval: val_loss = {avg_val:.4f}")
+                print(f"  >>> Eval: val_loss = {avg_val:.4f}", flush=True)
 
                 if avg_val < best_val_loss:
                     best_val_loss = avg_val
@@ -128,7 +139,7 @@ def train_sft():
                         "optimizer_state_dict": optimizer.state_dict(),
                         "val_loss": avg_val,
                     }, os.path.join(ckpt_dir, "best_sft_model.pt"))
-                    print(f"  [OK] New best SFT model saved!")
+                    print(f"  [OK] New best SFT model saved!", flush=True)
 
                 model.train()
 
@@ -142,7 +153,7 @@ def train_sft():
                 }, os.path.join(ckpt_dir, f"sft_step_{step}.pt"))
 
         avg_epoch_loss = epoch_loss / max(epoch_steps, 1)
-        print(f"Epoch {epoch+1} complete | Avg loss: {avg_epoch_loss:.4f}")
+        print(f"Epoch {epoch+1} complete | Avg loss: {avg_epoch_loss:.4f}", flush=True)
 
     print("\nSFT Training Complete!")
     print(f"Best val loss: {best_val_loss:.4f}")
