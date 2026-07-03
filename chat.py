@@ -12,10 +12,8 @@ def get_latest_checkpoint():
     sft_dir = "checkpoints/sft"
     
     if os.path.exists(dpo_dir):
-        ckpts = [f for f in os.listdir(dpo_dir) if f.endswith(".pt")]
-        if ckpts:
-            latest = sorted(ckpts, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
-            return os.path.join(dpo_dir, latest)
+        if os.path.exists(os.path.join(dpo_dir, "best_dpo_model.pt")):
+            return os.path.join(dpo_dir, "best_dpo_model.pt")
             
     if os.path.exists(sft_dir):
         if os.path.exists(os.path.join(sft_dir, "best_sft_model.pt")):
@@ -71,7 +69,7 @@ def main():
                 max_new_tokens=200, 
                 temperature=0.7, 
                 top_p=0.9, 
-                repetition_penalty=1.1,
+                repetition_penalty=1.25,
                 stop_token_id=tokenizer.special_to_id.get("<eos>", None)
             )
             
