@@ -124,24 +124,36 @@ def train_dpo():
     tokenizer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', config.TOKENIZER_PATH))
     tokenizer = BytePairTokenizer.load(tokenizer_path)
 
-    # Load SFT model as policy (trainable)
+    # Load SFT checkpoint (needed for reference model and starting policy)
     policy_model = GPTLanguageModel(config).to(device)
-    
     sft_ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'checkpoints', 'sft', 'best_sft_model.pt'))
-    print(f"Loading SFT model from {sft_ckpt_path}")
-    sft_ckpt = torch.load(
-        sft_ckpt_path,
-        map_location=device, weights_only=False,
-    )
-    policy_model.load_state_dict(sft_ckpt["model_state_dict"])
+    print(f"Loading SFT model from {sft_ckpt_path} as reference")
+    sft_ckpt = torch.load(sft_ckpt_path, map_location=device, weights_only=False)
 
-    # Create reference model (frozen copy of SFT model)
+    # Create reference model FIRST (must be the frozen SFT model)
     print("Cloning reference model...")
     ref_model = GPTLanguageModel(config).to(device)
-    ref_model.load_state_dict(policy_model.state_dict())
+    ref_model.load_state_dict(sft_ckpt["model_state_dict"])
     ref_model.eval()
     for param in ref_model.parameters():
         param.requires_grad = False
+        
+    # Check for existing DPO checkpoints to resume
+    ckpt_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'checkpoints', 'dpo'))
+    os.makedirs(ckpt_dir, exist_ok=True)
+    
+    start_step = 0
+    dpo_ckpts = [f for f in os.listdir(ckpt_dir) if f.startswith("dpo_step_")]
+    if dpo_ckpts:
+        latest_ckpt = sorted(dpo_ckpts, key=lambda x: int(x.split("_")[2].split(".")[0]))[-1]
+        latest_ckpt_path = os.path.join(ckpt_dir, latest_ckpt)
+        print(f"Resuming DPO training from {latest_ckpt_path}")
+        dpo_ckpt = torch.load(latest_ckpt_path, map_location=device, weights_only=False)
+        policy_model.load_state_dict(dpo_ckpt["model_state_dict"])
+        start_step = dpo_ckpt.get("step", 0)
+    else:
+        print("Starting fresh DPO training from SFT baseline")
+        policy_model.load_state_dict(sft_ckpt["model_state_dict"])
 
     # Load preference dataset
     data_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'preference_pairs.json'))
@@ -156,7 +168,7 @@ def train_dpo():
     os.makedirs(ckpt_dir, exist_ok=True)
     
     policy_model.train()
-    step = 0
+    step = start_step
     steps_per_epoch = len(dataset.examples) // batch_size
 
     print(f"Starting DPO Training: {dpo_epochs} epochs, {steps_per_epoch} steps per epoch.")
