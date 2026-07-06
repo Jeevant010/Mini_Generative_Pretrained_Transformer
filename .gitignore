@@ -245,3 +245,9 @@ __marimo__/
 AGENTS.md
 CLAUDE.md
 .claude/
+
+# --- Added for SFT & Evaluation ---
+data/
+hf_model/
+hf_best_model/
+eval_results/

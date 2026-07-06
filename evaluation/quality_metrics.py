@@ -235,17 +235,17 @@ def print_report(metrics):
 
     # Language modeling metrics
     if metrics.get("val_loss") is not None:
-        print(f"\n{'─'*40}")
+        print(f"\n{'-'*40}")
         print(f"  Language Modeling")
-        print(f"{'─'*40}")
+        print(f"{'-'*40}")
         print(f"  Validation Loss      : {metrics['val_loss']:.4f}")
         print(f"  Perplexity (PPL)     : {metrics['perplexity']:.2f}")
         print(f"  Bits Per Character   : {metrics['bpc']:.2f}")
 
     # Generation quality metrics
-    print(f"\n{'─'*40}")
+    print(f"\n{'-'*40}")
     print(f"  Generation Quality")
-    print(f"{'─'*40}")
+    print(f"{'-'*40}")
     print(f"  Distinct-1           : {metrics['distinct_1']:.4f}  (> 0.5 good)")
     print(f"  Distinct-2           : {metrics['distinct_2']:.4f}  (> 0.6 good)")
     print(f"  Distinct-3           : {metrics['distinct_3']:.4f}  (> 0.7 good)")
@@ -256,36 +256,35 @@ def print_report(metrics):
         print(f"  Output Entropy       : {metrics['output_entropy_bits']:.2f} bits  (5-10 healthy)")
 
     # Overall assessment
-    print(f"\n{'─'*40}")
+    print(f"\n{'-'*40}")
     print(f"  Assessment")
-    print(f"{'─'*40}")
+    print(f"{'-'*40}")
 
     issues = []
     if metrics["distinct_2"] < 0.3:
-        issues.append("⚠ LOW DIVERSITY: Distinct-2 < 0.3 — text is repetitive")
+        issues.append("[!] LOW DIVERSITY: Distinct-2 < 0.3 \u2014 text is repetitive")
     if metrics["self_bleu"] > 0.5:
-        issues.append("⚠ HIGH SELF-BLEU: > 0.5 — outputs are too similar to each other")
+        issues.append("[!] HIGH SELF-BLEU: > 0.5 \u2014 outputs are too similar to each other")
     if metrics["max_repeated_ngram"] > 5:
-        issues.append(f"⚠ LONG REPEAT: {metrics['max_repeated_ngram']}-gram repeats detected")
+        issues.append(f"[!] LONG REPEAT: {metrics['max_repeated_ngram']}-gram repeats detected")
     if metrics.get("output_entropy_bits") and metrics["output_entropy_bits"] < 3:
-        issues.append("⚠ LOW ENTROPY: < 3 bits — model is overconfident")
+        issues.append("[!] LOW ENTROPY: < 3 bits \u2014 model is overconfident")
     if metrics.get("perplexity") and metrics["perplexity"] > 100:
-        issues.append("⚠ HIGH PPL: > 100 — model still has much to learn")
+        issues.append("[!] HIGH PPL: > 100 \u2014 model still has much to learn")
 
     if issues:
         for issue in issues:
             print(f"  {issue}")
     else:
-        print("  ✅ All metrics in healthy range")
+        print("  [OK] All metrics in healthy range")
 
     # Sample previews
-    print(f"\n{'─'*40}")
+    print(f"\n{'-'*40}")
     print(f"  Generated Samples")
-    print(f"{'─'*40}")
+    print(f"{'-'*40}")
     for prompt, sample in metrics.get("samples", []):
-        preview = sample[:150] + "..." if len(sample) > 150 else sample
         print(f"\n  Prompt: \"{prompt}\"")
-        print(f"  Output: {preview}")
+        print(f"  Output:\n{sample}")
 
     print(f"\n{'='*65}\n")
 
